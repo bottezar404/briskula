@@ -262,13 +262,23 @@
     </svg>`;
   }
 
+  // uzorak na leđima crtan kao obični oblici (bez <pattern>): prisilni
+  // tamni način preglednika (Samsung/Chrome) <pattern> ispunu "ispere"
+  let backDots = '', backDia = '';
+  for (let y = 6; y <= 154; y += 7) for (let x = 6 + ((y / 7) % 2) * 3.5; x <= 94; x += 7) {
+    backDia += `M${x},${y - 3.5}L${x + 3.5},${y}L${x},${y + 3.5}L${x - 3.5},${y}Z`;
+    backDots += `M${x - 0.9},${y}a.9,.9 0 1,0 1.8,0a.9,.9 0 1,0 -1.8,0`;
+  }
   function back() {
     return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 160" class="card-svg">
-      <defs><pattern id="bp" width="10" height="10" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
-        <rect width="10" height="10" fill="${BL}"/><rect width="5" height="5" fill="#2d62c4"/><rect x="5" y="5" width="5" height="5" fill="#173d84"/></pattern></defs>
+      <defs><clipPath id="bc"><rect x="6" y="6" width="88" height="148" rx="3"/></clipPath></defs>
       <rect x=".6" y=".6" width="98.8" height="158.8" rx="8" fill="${W}" stroke="#bdbdbd" stroke-width="1.2"/>
-      <rect x="6" y="6" width="88" height="148" rx="3" fill="url(#bp)" stroke="${K}" stroke-width=".7"/>
+      <g clip-path="url(#bc)"><rect x="6" y="6" width="88" height="148" fill="#173d84"/>
+        <path d="${backDia}" fill="#2d62c4"/><path d="${backDots}" fill="${Y}"/></g>
+      <rect x="6" y="6" width="88" height="148" rx="3" fill="none" stroke="${K}" stroke-width=".7"/>
       <rect x="10" y="10" width="80" height="140" rx="2" fill="none" stroke="${Y}" stroke-width="1.2"/>
+      <path d="M50,58 L72,80 L50,102 L28,80 Z" fill="${R}" stroke="${Y}" stroke-width="2"/>
+      <circle cx="50" cy="80" r="8" fill="${Y}" stroke="${K}" stroke-width=".8"/><circle cx="50" cy="80" r="3.5" fill="${R}"/>
     </svg>`;
   }
 
@@ -279,8 +289,22 @@
     return `<g transform="rotate(25)">${straightSword(0, -15, 15)}</g>`;
   }
 
+  // Karte se crtaju kao <img> (SVG u data-URI), a ne kao SVG u stranici.
+  // Prisilni tamni način preglednika (npr. Samsung Internet) prebojava boje
+  // elemenata stranice, ali slike ostavlja na miru, pa karte ostaju bijele.
+  const imgCache = new Map();
+  const asImg = (key, svg) => {
+    let h = imgCache.get(key);
+    if (!h) {
+      h = `<img class="card-img" alt="" draggable="false" src="data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg.replace(/\s+/g, ' '))}">`;
+      imgCache.set(key, h);
+    }
+    return h;
+  };
+
   root.CardArt = {
-    face, back,
+    face: c => asImg(c, face(c)),
+    back: () => asImg('back', back()),
     suit: s => `<svg viewBox="-16 -16 32 32" class="suit-svg">${suitIcon(s)}</svg>`,
   };
 })(typeof self !== 'undefined' ? self : this);

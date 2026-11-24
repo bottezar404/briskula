@@ -136,5 +136,39 @@ label.chk input { width: 20px; height: 20px; }
 #toast.show { opacity: 1; }
 @media (min-width: 700px) { :root { --cw: min(14vw, 14vh, 120px); --sw: min(6vw, 6.5vh, 56px); } }
 
+/* ---------- veliki ekran (desktop) ---------- */
+@media (min-width: 900px) and (min-height: 520px) {
+  :root { --cw: min(11.5vw, calc((100vh - 100px) / 5.2), 175px); --sw: calc(var(--cw) * .56); }
+  .topbar, .table, .me { width: 100%; max-width: 1280px; margin-left: auto; margin-right: auto; }
+  .topbar { font-size: 16px; padding: 8px 16px; }
+  .topbar button.small { font-size: 15px; padding: 8px 14px; }
+  .nameplate { font-size: 17px; padding: 6px 14px; }
+  .status { font-size: 20px; bottom: 10px; }
+  .seat.top { flex-direction: row; gap: 14px; top: 6px; }
+  .seat.left { left: 16px; top: 36%; }
+  .seat.right { right: 16px; top: 36%; }
+  .mode3 .seat.left, .mode3 .seat.right { top: 30%; }
+  .deck { left: 20px; top: auto; bottom: 16px; transform: none; }
+  .has-left .deck { top: auto; }
+  .trumpinfo, .has-left .trumpinfo { left: 20px; top: auto; bottom: 20px; transform: none; font-size: 14px; }
+  .trumpinfo .suit-svg { width: 48px; height: 48px; }
+  .deck .count { font-size: 18px; }
+  .trick { top: calc(50% + var(--sw) * .75); }
+  .trick .card { width: calc(var(--cw) * .84); height: calc(var(--ch) * .84); left: calc(var(--cw) * -0.42); top: calc(var(--ch) * -0.42); }
+  .trick .pos-bottom { transform: translate(0, 36%) rotate(2deg); }
+  .trick .pos-top { transform: translate(0, -36%) rotate(-3deg); }
+  .trick .pos-left { transform: translate(-80%, 0) rotate(-9deg); }
+  .trick .pos-right { transform: translate(80%, 0) rotate(8deg); }
+  .me { flex-direction: row; justify-content: center; align-items: center; gap: 22px; padding: 6px 16px 14px; }
+  .me > div:has(> .nameplate) { order: -1; min-width: 180px; display: flex; justify-content: flex-end; }
+  .hand { gap: 16px; }
+  .hand.myturn .card.playable { transform: translateY(-10px); }
+  .hand .card.playable:hover { transform: translateY(-18px); }
+  .signals { display: grid; grid-template-columns: auto auto; grid-auto-flow: column; grid-template-rows: repeat(6, auto); gap: 6px; min-width: 180px; justify-content: start; }
+  .signals button { font-size: 14px; padding: 7px 12px; }
+  .seat .bubble, .me .bubble { font-size: 17px; }
+}
+
+
 .mode3 .seat.left, .mode3 .seat.right { top: 24%; }
 .mode3 .trick { top: 50%; }

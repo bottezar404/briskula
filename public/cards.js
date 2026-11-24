@@ -252,13 +252,13 @@
     else if (s === 'kupe') center = CUP_POS[r].map(([x, y]) => cup(x, y, CUP_S[r])).join('');
     else if (s === 'bate') center = pipsBate(r);
     else center = pipsSpade(r);
-    const idx = `<text x="10.5" y="16" font-size="${r > 9 ? 8.5 : 10}" text-anchor="middle" font-family="Georgia,serif" fill="${K}">${r}</text>`;
+    const idx = `<text x="10.5" y="18.4" font-size="${r > 9 ? 11 : 13}" font-weight="700" text-anchor="middle" font-family="Georgia,serif" fill="${K}">${r}</text>`;
     return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 160" class="card-svg">
       <rect x=".6" y=".6" width="98.8" height="158.8" rx="8" fill="${W}" stroke="#bdbdbd" stroke-width="1.2"/>
       <g>${center}</g>
       <rect x="6" y="6" width="88" height="148" rx="3" fill="none" stroke="${K}" stroke-width=".7"/>
-      <rect x="4" y="8" width="13" height="11" fill="${W}"/>${idx}
-      <g transform="rotate(180 50 80)"><rect x="4" y="8" width="13" height="11" fill="${W}"/>${idx}</g>
+      <rect x="3.2" y="7.2" width="14.6" height="14" fill="${W}"/>${idx}
+      <g transform="rotate(180 50 80)"><rect x="3.2" y="7.2" width="14.6" height="14" fill="${W}"/>${idx}</g>
     </svg>`;
   }
 

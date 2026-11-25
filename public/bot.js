@@ -67,9 +67,41 @@
     return sorted[0];
   }
 
+  // ---------- "Chi fa meno": cilj je skupiti što manje bodova ----------
+  // Tko vodi štih najčešće ga i nosi (ne mora se odgovarati na boju, pa
+  // ostali samo bace slabiju kartu i "utovare" mu bodove). Zato se vodi
+  // kartom bez bodova, a jake karte (briškule, visoke karte) se troše kad
+  // se ionako mora nositi, dok se niske karte čuvaju da se može izgubiti štih.
+  function leadLow(v) {
+    const T = v.trumpSuit;
+    return v.hand.slice().sort((a, b) =>
+      E.points(a) - E.points(b) ||
+      (E.suitOf(b) === T) - (E.suitOf(a) === T) ||
+      E.strength(b) - E.strength(a))[0];
+  }
+
+  function followLow(v) {
+    const T = v.trumpSuit, me = v.you, mode = v.mode, trick = v.trick;
+    const best = bestOfTrick(trick, T);
+    const losers = v.hand.filter(c => !E.beats(c, best.card, T));
+    const partnerWinning = mode === 4 && E.teamOf(4, best.p) === E.teamOf(4, me);
+    if (losers.length) {
+      if (partnerWinning) {
+        // suigrač nosi: ne dodaji mu bodove
+        return losers.sort((a, b) => E.points(a) - E.points(b) || E.strength(b) - E.strength(a))[0];
+      }
+      // protivnik nosi: istovari mu što više bodova (prvo opasne karte)
+      return losers.sort((a, b) => E.points(b) - E.points(a) ||
+        (E.suitOf(b) === T) - (E.suitOf(a) === T) || E.strength(b) - E.strength(a))[0];
+    }
+    // moram nositi: što manje bodova, a usput se riješi najjače karte
+    return v.hand.slice().sort((a, b) => E.points(a) - E.points(b) || E.strength(b) - E.strength(a))[0];
+  }
+
   // Savršena igra u završnici za dvoje (špil prazan, sve karte poznate)
   function endgame2(v) {
     const T = v.trumpSuit;
+    const sign = v.low ? -1 : 1; // u "Chi fa meno" bodovi su loši
     const seen = new Set([...v.played, ...v.hand, ...v.trick.map(t => t.card)]);
     const opp = E.fullDeck().filter(c => !seen.has(c));
     const me = v.you;
@@ -80,7 +112,7 @@
         const winnerMe = trick[w].p === me;
         const pts = E.points(trick[0].card) + E.points(trick[1].card);
         const r = solve(myH, opH, [], winnerMe, winnerMe);
-        return { val: r.val + (winnerMe ? pts : -pts) };
+        return { val: r.val + sign * (winnerMe ? pts : -pts) };
       }
       if (!myH.length && !opH.length) return { val: 0 };
       const hand = turnMe ? myH : opH;
@@ -105,6 +137,7 @@
       const c = endgame2(v);
       if (c) return c;
     }
+    if (v.low) return v.trick.length === 0 ? leadLow(v) : followLow(v);
     return v.trick.length === 0 ? lead(v) : follow(v);
   }
 

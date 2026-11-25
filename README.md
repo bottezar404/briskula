@@ -8,7 +8,7 @@ Radi u pregledniku i može se instalirati na mobitel kao aplikacija (PWA).
 ```bash
 npm install
 npm start          # http://localhost:3000
-npm test           # simulacija 8000 partija botova + provjera pravila
+npm test           # simulacija 16000 partija botova (obje vrste igre) + provjera pravila
 ```
 
 ## Što ima
@@ -18,6 +18,9 @@ npm test           # simulacija 8000 partija botova + provjera pravila
   Prazna mjesta domaćin popuni botovima. „Brza igra” spaja s bilo kim tko čeka.
 - **Parovi** – suigrači nasuprot, tajni znakovi samo za suigrača, a kad se špil potroši vidiš karte suigrača.
 - **Troje** – izbacuje se dvica dinara (39 karata).
+- **Chi fa meno** („tko napravi manje”) – iste karte i pravila, ali pobjeđuje tko skupi **manje** bodova.
+  Tko pokupi svih 120 bodova (kapot), odmah pobjeđuje. Radi u dvoje, troje i parovima, s botovima i online;
+  botovi tada igraju da izbjegnu bodove i „utovare” ih protivniku.
 - Ako igrač izgubi vezu, može se vratiti (osvježi stranicu); nakon 25 s bot odigra umjesto njega.
 - Originalne karte nacrtane u SVG-u (`public/cards.js`).
 

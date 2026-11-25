@@ -9,7 +9,7 @@ Radi u pregledniku i može se instalirati na mobitel kao aplikacija (PWA).
 ```bash
 npm install
 npm start          # http://localhost:3000
-npm test           # simulacija partija botova (briškula, chi fa meno, trešeta, poker), online testovi, turnir
+npm test           # simulacija partija botova (briškula, chi fa meno, trešeta, poker), online testovi, turnir, računi
 ```
 
 ## Što ima
@@ -37,6 +37,10 @@ npm test           # simulacija partija botova (briškula, chi fa meno, trešeta
 - **Turnir** – tri igre zaredom: briškula, trešeta (do odabranog cilja), poker (blindovi rastu svake 4 ruke).
   U svakoj igri bod za svakog nadigranog protivnika (izjednačeno ½; u parovima pobjednički par po 2),
   pobjeđuje tko ima najviše bodova, a kod izjednačenja bolji u pokeru. Protiv botova i online.
+- **Korisnički računi** (nisu obavezni, i dalje se može igrati kao gost): korisničko ime + lozinka, bez e-maila.
+  Račun pamti profil (ime, avatar, dužina pišulinca) na svim uređajima i **statistiku** (odigrano / pobjede po igri,
+  posebno online i protiv botova). **Prijatelji** se dodaju po korisničkom imenu (zahtjev + prihvaćanje); vidi se tko je
+  online i gdje je (izbornik, soba, igra), prijatelja se može **pozvati u sobu** ili mu se **pridružiti**.
 - Ako igrač izgubi vezu, može se vratiti (osvježi stranicu); nakon 25 s bot odigra umjesto njega.
 - Originalne karte nacrtane u SVG-u (`public/cards.js`).
 
@@ -50,6 +54,16 @@ npm test           # simulacija partija botova (briškula, chi fa meno, trešeta
 - `public/app.js`, `style.css`, `index.html` – sučelje
 - `public/sw.js`, `manifest.webmanifest`, `icons/` – PWA
 - `server/index.js` – Node server (statičke datoteke + WebSocket na `/ws`)
+- `server/accounts.js`, `server/store.js` – računi, statistika, prijatelji i pohrana (Postgres ili JSON datoteka)
+
+## Baza za račune
+
+Računi se spremaju u Postgres ako je postavljena varijabla `DATABASE_URL` (tablica `brk_kv` se napravi sama).
+Bez nje se spremaju u `data/accounts.json`, što je dobro za lokalni rad, ali na Renderu (besplatni plan) se ta
+datoteka briše kod svakog restarta i nove verzije.
+
+Besplatna baza, npr. [Neon](https://neon.tech): napravi projekt, kopiraj „Connection string”
+(`postgresql://…?sslmode=require`) i na Renderu ga dodaj u *Environment* kao `DATABASE_URL`.
 
 ## Objava
 

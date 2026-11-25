@@ -5,11 +5,12 @@
   "main": "server/index.js",
   "scripts": {
     "start": "node server/index.js",
-    "test": "node test/sim.js && node test/timer.js && node test/ready.js && node test/poker.js && node test/poker-online.js && node test/turnir.js"
+    "test": "node test/sim.js && node test/timer.js && node test/ready.js && node test/poker.js && node test/poker-online.js && node test/turnir.js && node test/accounts.js"
   },
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "pg": "^8.23.1",
     "ws": "^8.23.0"
   },
   "engines": {

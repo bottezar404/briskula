@@ -219,13 +219,13 @@
     return evalState(st, me);
   }
 
-  function pimc(v, budgetMs) {
+  function pimc(v, budgetMs, minN, maxN, prefer, bonus) {
     const legal = T.legalCards(v.hand, v.trick);
     if (legal.length === 1) return legal[0];
     const tot = legal.map(() => 0);
     const t0 = Date.now();
     let n = 0;
-    while (n < 8 || (Date.now() - t0 < budgetMs && n < 60)) {
+    while (n < minN || (Date.now() - t0 < budgetMs && n < maxN)) {
       const d = determinize(v);
       if (!d) break;
       legal.forEach((c, i) => {
@@ -235,6 +235,9 @@
       n++;
     }
     if (!n) return heuristic(v);
+    // mala prednost karti koju bi izabrala pravila: zamišljenih partija je malo,
+    // pa se pravila ne napuštaju zbog slučajne razlike
+    if (prefer) tot[legal.indexOf(prefer)] += bonus * n;
     let bi = 0;
     for (let i = 1; i < legal.length; i++) if (tot[i] > tot[bi]) bi = i;
     return legal[bi];
@@ -287,7 +290,11 @@
         const c = endgame2(v);
         if (c) return c;
       }
-      return pimc(v, 120);
+      return pimc(v, 120, 8, 60);
+    }
+    if (level === 'normal') {
+      // normalni: pravila + kratko "razmišljanje" (12 zamišljenih rasporeda)
+      return pimc(v, 0, 12, 12, heuristic(v), 1);
     }
     return heuristic(v);
   }

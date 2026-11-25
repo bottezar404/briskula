@@ -3,18 +3,29 @@
   'use strict';
   const E = window.BriskulaEngine, B = window.BriskulaBot, Art = window.CardArt;
   const T = window.TresetaEngine, TB = window.TresetaBot, AV = window.Avatars;
-  const engOf = k => k === 'treseta' ? T : E;
-  const botOf = k => k === 'treseta' ? TB : B;
+  const P = window.PokerEngine, PB = window.PokerBot, TR = window.Turnir;
+  const engOf = k => k === 'treseta' ? T : k === 'poker' ? P : E;
+  const botOf = k => k === 'treseta' ? TB : k === 'poker' ? PB : B;
+  // strana za brojanje pobjeda: u pokeru svatko za sebe (i u četvero)
+  const sideOf = (kind, mode, p) => kind === 'poker' ? p : E.teamOf(mode, p);
   const $app = document.getElementById('app');
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const MODE_NAMES = { 2: 'Dvoje', 3: 'Troje', 4: 'Parovi (2 na 2)' };
   const MODE_SHORT = { 2: 'Dvoje', 3: 'Troje', 4: 'Parovi' };
   const LEVEL_NAMES = { easy: 'Lako', normal: 'Srednje', hard: 'Teško' };
   const LOW_NAME = 'Chi fa meno';
-  const KIND_NAMES = { briskula: 'Briškula', treseta: 'Trešeta' };
-  const KINDS = [['briskula', 'Briškula'], ['treseta', 'Trešeta']];
+  const KIND_NAMES = { briskula: 'Briškula', treseta: 'Trešeta', poker: 'Poker', turnir: 'Turnir' };
+  const KINDS = [['briskula', 'Briškula'], ['treseta', 'Trešeta'], ['poker', 'Poker'], ['turnir', 'Turnir']];
   const LOWS = [[0, 'Obično'], [1, LOW_NAME]];
-  const kindLabel = (k, low) => (k === 'treseta' ? ' · Trešeta' : '') + (low ? ' · ' + LOW_NAME : '');
+  const kindLabel = (k, low) => (k === 'treseta' ? ' · Trešeta' : k === 'poker' ? ' · Poker' : '') + (low && k !== 'poker' ? ' · ' + LOW_NAME : '');
+  // u pokeru se u četvero ne igra u parovima
+  const modeName = (kind, mode, short) => kind === 'poker' && mode === 4 ? 'Četvero' : (short ? MODE_SHORT : MODE_NAMES)[mode];
+  const modeSeg = kind => [[2, 'Dvoje'], [3, 'Troje'], [4, kind === 'poker' || kind === 'turnir' ? 'Četvero' : 'Parovi']];
+  // naslov za turnir, npr. "Turnir 2/3 · Trešeta"
+  const TOUR_BLINDS = 4; // u turniru blindovi u pokeru rastu brže (svake 4 ruke)
+  // redni broj igre u turniru (kad je igra gotova, već je upisana u rezultate)
+  const tourLabel = (t, g) => t ? `Turnir ${Math.min(g && g.phase === 'over' ? t.results.length : t.idx + 1, t.stages.length)}/${t.stages.length} · ` : '';
+  const TOUR_ABBR = { briskula: 'Briš.', treseta: 'Treš.', poker: 'Poker' };
 
   // ---------- postavke ----------
   const store = {
@@ -89,44 +100,72 @@
   class LocalGame {
     constructor(mode, level, name, kind, target, low) {
       this.mode = mode; this.level = level; this.local = true; this.kind = kind || 'briskula'; this.low = !!low; this.target = target || 41;
+      // turnir: briškula → trešeta → poker, ukupni bodovi po mjestu u svakoj igri
+      this.tour = this.kind === 'turnir' ? TR.newTour(mode) : null;
+      if (this.tour) { this.kind = TR.stageKind(this.tour); this.low = false; }
       this.E = engOf(this.kind); this.B = botOf(this.kind);
       const botNames = ['Jure', 'Mare', 'Ante', 'Luce', 'Frane', 'Tonka'].sort(() => Math.random() - .5);
       this.names = [name || 'Ti'].concat(botNames.slice(0, mode - 1).map(n => 'Bot ' + n));
       this.avs = this.names.map((n, i) => i ? AV.forName(n) : null);
       this.cms = this.names.map((n, i) => i ? botCm() : 0); // botovi: nasumično, isto cijelu partiju
-      this.wins = Array(mode === 4 ? 2 : mode).fill(0);
+      this.wins = Array(mode === 4 && this.kind !== 'poker' ? 2 : mode).fill(0);
       this.signals = []; this.dealer = Math.floor(Math.random() * mode) - 1;
       this.start();
     }
     start() {
+      if (this.tour) {
+        if (this.tour.done) this.tour = TR.newTour(this.mode);
+        const k = TR.stageKind(this.tour);
+        if (k !== this.kind) {
+          this.kind = k; this.E = engOf(k); this.B = botOf(k);
+          this.wins = Array(this.mode === 4 && k !== 'poker' ? 2 : this.mode).fill(0);
+        }
+      }
       this.dealer = (this.dealer + 1) % this.mode;
-      this.st = this.E.newGame(this.mode, { names: this.names, bots: this.names.map((_, i) => i > 0), dealer: this.dealer, low: this.low, target: this.target });
+      this.st = this.E.newGame(this.mode, { names: this.names, bots: this.names.map((_, i) => i > 0), dealer: this.dealer, low: this.low, target: this.target, blindEvery: this.tour ? TOUR_BLINDS : undefined });
+      this.counted = false;
       this.signals = [];
       this.emit(); this.schedule();
     }
     view() {
       return {
-        type: 'room', local: true, code: null, mode: this.mode, level: this.level, low: this.low, kind: this.kind, target: this.target, host: true, you: 0, wins: this.wins,
+        type: 'room', local: true, code: null, mode: this.mode, level: this.level, low: this.low, kind: this.kind, target: this.target, host: true, you: 0, wins: this.wins, tour: this.tour,
         seats: this.names.map((n, i) => ({ name: n, bot: i > 0, connected: true, av: i ? this.avs[i] : myAv(), cm: i ? this.cms[i] : S.cm })),
         game: this.E.viewFor(this.st, 0), signals: this.signals.slice(-6),
       };
     }
-    emit() { onRoom(this.view()); }
+    emit() {
+      const st = this.st;
+      // kraj partije: pobjeda se upiše jednom (poker može završiti i kad svi odustanu)
+      if (st.phase === 'over' && !this.counted) {
+        this.counted = true;
+        if (!st.result.draw) this.wins[sideOf(this.kind, this.mode, st.result.winners[0])]++;
+        if (this.tour && !this.tour.done) TR.record(this.tour, this.kind, st.result);
+      }
+      onRoom(this.view());
+    }
     schedule() {
       clearTimeout(this.timer);
       const st = this.st;
+      const pk = this.kind === 'poker';
       if (st.phase === 'collect') this.timer = setTimeout(() => {
         this.E.collect(st);
-        if (st.phase === 'over' && !st.result.draw) this.wins[E.teamOf(this.mode, st.result.winners[0])]++;
         this.emit(); this.schedule();
-      }, this.kind === 'treseta' ? 1000 : 1350);
+      }, this.kind === 'treseta' ? 1000 : pk ? 1000 : 1350);
       else if (st.phase === 'play' && st.turn !== 0) this.timer = setTimeout(() => {
         const c = this.B.choose(this.E.viewFor(st, st.turn), this.level);
         this.E.play(st, st.turn, c); this.emit(); this.schedule();
-      }, this.kind === 'treseta' ? 400 + Math.random() * 300 : 650 + Math.random() * 450);
+      }, this.kind === 'treseta' ? 400 + Math.random() * 300 : pk ? 700 + Math.random() * 600 : 650 + Math.random() * 450);
     }
     play(c) { if (this.E.play(this.st, 0, c)) { this.emit(); this.schedule(); } }
-    next() { if (this.st.phase === 'hand') { T.nextHand(this.st); this.signals = []; this.emit(); this.schedule(); } }
+    next() {
+      const st = this.st;
+      if (st.phase !== 'hand') return;
+      // poker: ako sam ispao/la, botovi odigraju ostatak odmah (da se zna poredak)
+      if (this.kind === 'poker' && st.players[0].out) PB.finish(st, this.level);
+      else this.E.nextHand(st);
+      this.signals = []; this.emit(); this.schedule();
+    }
     signal(text, team) {
       this.signals.push({ id: Math.random(), from: 0, text, team: team ? 0 : null });
       this.emit();
@@ -182,7 +221,7 @@
     const old = room; room = r;
     const g = r.game, og = old && old.game;
     if (g && og) {
-      if (g.trick.length > og.trick.length) sfx.play();
+      if (g.trick.length > og.trick.length || (g.kind === 'poker' && g.log && og.log && g.trickNo > og.trickNo && g.log.length && g.log[g.log.length - 1].p >= 0)) sfx.play();
       if (g.phase === 'play' && g.turn === g.you && !(og.phase === 'play' && og.turn === og.you)) sfx.turn();
       if (g.phase === 'over' && og.phase !== 'over') setTimeout(() => sfx.win(), 200);
     }
@@ -290,9 +329,12 @@
   const KIND_DESC = {
     briskula: 'Klasična briškula: pobjeđuje tko skupi više bodova.',
     treseta: 'Trešeta: bez briškule, mora se odgovoriti na boju. Igra se u više ruku, do zadanog broja bodova.',
+    poker: 'Poker (Texas Hold\'em) s kartama briškule: 2 karte u ruci, 5 na stolu, ulaže se žetonima. Pobjeđuje tko pokupi sve žetone.',
+    turnir: 'Turnir: tri igre zaredom, <b>briškula → trešeta → poker</b>. U svakoj igri dobiješ bod za svakog protivnika kojeg nadigraš; pobjeđuje tko na kraju ima najviše bodova. U četvero se briškula i trešeta igraju u parovima, a poker svatko za sebe.',
   };
   function kindDesc(kind, low) {
-    if (!low) return KIND_DESC[kind];
+    if (kind === 'turnir') return KIND_DESC.turnir + ` Trešeta se igra do ${S.target}.`;
+    if (!low || kind === 'poker') return KIND_DESC[kind];
     return kind === 'treseta'
       ? `Trešeta „${LOW_NAME}”: pobjeđuje tko skupi <b>manje</b> bodova. Partija traje dok netko ne dođe do cilja.`
       : `Briškula „${LOW_NAME}”: pobjeđuje tko skupi <b>manje</b> bodova.`;
@@ -320,19 +362,19 @@
       <div class="panel">
         <h2>Vrsta igre</h2>
         ${seg('kind', KINDS, S.kind)}
-        ${seg('naManje', LOWS, S.naManje)}
-        ${S.kind === 'treseta' ? seg('target', [[21, 'Do 21'], [31, 'Do 31'], [41, 'Do 41']], S.target) : ''}
+        ${S.kind === 'poker' || S.kind === 'turnir' ? '' : seg('naManje', LOWS, S.naManje)}
+        ${S.kind === 'treseta' || S.kind === 'turnir' ? seg('target', [[21, 'Do 21'], [31, 'Do 31'], [41, 'Do 41']], S.target) : ''}
         <p class="muted" style="margin:0">${kindDesc(S.kind, S.naManje)}</p>
       </div>
       <div class="panel">
         <h2>Igraj protiv botova</h2>
-        ${seg('botMode', [[2, 'Dvoje'], [3, 'Troje'], [4, 'Parovi']], S.botMode)}
+        ${seg('botMode', modeSeg(S.kind), S.botMode)}
         ${seg('botLevel', [['easy', 'Lako'], ['normal', 'Srednje'], ['hard', 'Teško']], S.botLevel)}
         <button id="playBots" style="width:100%">Igraj</button>
       </div>
       ${window.BRK_OFFLINE ? '<p class="muted" style="text-align:center">Ovo je probna verzija samo s botovima. Online igra radi kad se aplikacija postavi na server.</p>' : `<div class="panel">
         <h2>Online s drugim igračima</h2>
-        ${seg('onMode', [[2, 'Dvoje'], [3, 'Troje'], [4, 'Parovi']], S.onMode)}
+        ${seg('onMode', modeSeg(S.kind), S.onMode)}
         <div class="stack">
           <div class="row"><button id="create">Napravi sobu</button><button id="quick" class="ghost">Brza igra</button></div>
           <div class="row"><input id="code" maxlength="5" placeholder="Kod sobe" style="text-transform:uppercase"><button id="join" class="ghost" style="flex:0 0 auto">Uđi</button></div>
@@ -355,7 +397,7 @@
     $app.querySelectorAll('[data-cm]').forEach(b => b.onclick = () => setCm(S.cm + +b.dataset.cm));
     bindSegs();
     const needName = () => { if (!S.name) { S.name = 'Igrač' + Math.floor(Math.random() * 900 + 100); save(); } };
-    $app.querySelector('#playBots').onclick = () => { needName(); ctrl = new LocalGame(+S.botMode, S.botLevel, S.name, S.kind, S.target, !!S.naManje); };
+    $app.querySelector('#playBots').onclick = () => { needName(); ctrl = new LocalGame(+S.botMode, S.botLevel, S.name, S.kind, S.target, !['poker', 'turnir'].includes(S.kind) && !!S.naManje); };
     if (!window.BRK_OFFLINE) {
     $app.querySelector('#create').onclick = () => { needName(); ctrl = getNet(); ctrl.send(profileMsg()); ctrl.send({ type: 'create', mode: +S.onMode, level: 'normal', kind: S.kind, low: !!S.naManje, target: S.target, turnTime: S.turnTime }); };
     $app.querySelector('#quick').onclick = () => { needName(); ctrl = getNet(); ctrl.send(profileMsg()); ctrl.send({ type: 'quick', mode: +S.onMode, kind: S.kind, low: !!S.naManje }); };
@@ -389,7 +431,7 @@
     const full = r.seats.every(Boolean);
     const conn = net && net.ok;
     $app.innerHTML = `<div class="menu">
-      <div class="topbar"><button class="ghost small" id="leave">← Izlaz</button><div class="mid">${MODE_NAMES[r.mode]}${kindLabel(r.kind, r.low)}${r.isPublic ? ' · javna igra' : ''}</div>${chatBtn()}</div>
+      <div class="topbar"><button class="ghost small" id="leave">← Izlaz</button><div class="mid">${r.tour ? tourLabel(r.tour) + modeName('turnir', r.mode) : modeName(r.kind, r.mode) + kindLabel(r.kind, r.low)}${r.isPublic ? ' · javna igra' : ''}</div>${chatBtn()}</div>
       <div class="panel" style="text-align:center">
         <div class="muted">Kod sobe</div>
         <div class="code">${esc(r.code)}</div>
@@ -401,21 +443,25 @@
         <ul class="seats">${r.seats.map((s, i) => `<li>
           ${avatar(s, 'md')}
           <span class="n">${s ? esc(s.name) + (i === r.you ? ' (ti)' : '') : '<span class="muted">čeka se igrač…</span>'}${s && s.cm ? `<span class="cmt">Dužina pišulinca: ${s.cm} cm</span>` : ''}</span>
-          ${r.mode === 4 ? `<span class="tag team${i % 2}">${i % 2 ? 'Par B' : 'Par A'}</span>` : ''}
+          ${r.mode === 4 && r.kind !== 'poker' ? `<span class="tag team${i % 2}">${i % 2 ? 'Par B' : 'Par A'}</span>` : ''}
           ${s && s.bot ? '<span class="tag">bot</span>' : ''}
           ${s && !s.bot && !s.connected ? '<span class="tag">odspojen</span>' : ''}
           ${(!s || s.bot) && i !== r.you ? `<button class="ghost small" data-seat="${i}">Sjedni ovdje</button>` : ''}
           ${r.host && s && s.bot ? `<button class="ghost small" data-kick="${i}">✕</button>` : ''}
         </li>`).join('')}</ul>
-        ${r.mode === 4 ? '<p class="muted">Par A (1. i 3. mjesto) igra protiv para B (2. i 4.). Klikni „Sjedni ovdje” da promijeniš mjesto.</p>' : ''}
+        ${r.tour && (r.tour.idx > 0 || r.tour.done) ? tourTable(r, true) : ''}
+        ${r.mode === 4 && r.kind !== 'poker' ? '<p class="muted">Par A (1. i 3. mjesto) igra protiv para B (2. i 4.). Klikni „Sjedni ovdje” da promijeniš mjesto.</p>' : ''}
         ${r.host && !r.isPublic ? `
           <div class="muted" style="margin-bottom:6px">Vrsta igre</div>
-          ${seg('roomKind', KINDS, r.kind || 'briskula')}
-          ${seg('roomLow', LOWS, r.low ? 1 : 0)}
-          ${r.kind === 'treseta' ? seg('roomTarget', [[21, 'Do 21'], [31, 'Do 31'], [41, 'Do 41']], r.target) : ''}
+          ${seg('roomKind', KINDS, r.tour ? 'turnir' : r.kind || 'briskula')}
+          ${r.kind === 'poker' || r.tour ? '' : seg('roomLow', LOWS, r.low ? 1 : 0)}
+          ${r.tour ? `<p class="muted" style="margin-top:-4px">${KIND_DESC.turnir}</p>` : ''}
+          ${r.kind === 'treseta' || r.tour ? seg('roomTarget', [[21, 'Do 21'], [31, 'Do 31'], [41, 'Do 41']], r.target) : ''}
           <div class="muted" style="margin-bottom:6px">Vrijeme za potez</div>
           ${seg('roomTime', TURN_OPTS, r.turnTime || 0)}
           <p class="muted" style="margin-top:-4px">${turnTimeDesc(r.turnTime)}</p>`
+        : r.tour ? `<p class="muted">${KIND_DESC.turnir} Trešeta se igra do ${r.target}.</p>`
+        : r.kind === 'poker' ? `<p class="muted">Igra se <b>poker</b> (Texas Hold'em s kartama briškule).</p>`
         : r.kind === 'treseta' ? `<p class="muted">Igra se <b>trešeta</b>${r.low ? ' ' + LOW_NAME + ' (pobjeđuje tko ima manje)' : ''} do ${r.target} bodova.</p>`
         : r.low ? `<p class="muted">Igra se <b>${LOW_NAME}</b>: pobjeđuje tko skupi manje bodova.</p>` : ''}
         ${!r.host || r.isPublic ? `<p class="muted">${turnTimeDesc(r.turnTime)}</p>` : ''}
@@ -432,7 +478,7 @@
     const sh = $app.querySelector('#share');
     if (sh) sh.onclick = async () => {
       const url = link();
-      if (navigator.share) { try { await navigator.share({ title: 'Briškula', text: 'Dođi na partiju ' + (r.kind === 'treseta' ? 'trešete' : 'briškule') + '! Kod: ' + r.code, url }); return; } catch { } }
+      if (navigator.share) { try { await navigator.share({ title: 'Briškula', text: (r.tour ? 'Dođi na turnir (briškula, trešeta, poker)' : 'Dođi na partiju ' + ({ treseta: 'trešete', poker: 'pokera' }[r.kind] || 'briškule')) + '! Kod: ' + r.code, url }); return; } catch { } }
       try { await navigator.clipboard.writeText(url); toast('Link kopiran'); } catch { toast(url); }
     };
     $app.querySelectorAll('[data-seat]').forEach(b => b.onclick = () => ctrl.send({ type: 'seat', seat: +b.dataset.seat }));
@@ -440,7 +486,7 @@
       $app.querySelector('#addBot').onclick = () => ctrl.send({ type: 'addBot' });
       $app.querySelector('#start').onclick = () => ctrl.send({ type: 'start', fillBots: true });
       $app.querySelectorAll('[data-kick]').forEach(b => b.onclick = () => ctrl.send({ type: 'kick', seat: +b.dataset.kick }));
-      $app.querySelectorAll('[data-seg="roomKind"] button').forEach(b => b.onclick = () => ctrl.send({ type: 'variant', kind: b.dataset.v, low: !!r.low }));
+      $app.querySelectorAll('[data-seg="roomKind"] button').forEach(b => b.onclick = () => { if (b.dataset.v !== (r.tour ? 'turnir' : r.kind)) ctrl.send({ type: 'variant', kind: b.dataset.v, low: !!r.low }); });
       $app.querySelectorAll('[data-seg="roomLow"] button').forEach(b => b.onclick = () => ctrl.send({ type: 'variant', kind: r.kind || 'briskula', low: b.dataset.v === '1' }));
       $app.querySelectorAll('[data-seg="roomTarget"] button').forEach(b => b.onclick = () => ctrl.send({ type: 'target', target: +b.dataset.v }));
       $app.querySelectorAll('[data-seg="roomTime"] button').forEach(b => b.onclick = () => { S.turnTime = +b.dataset.v; save(); ctrl.send({ type: 'turnTime', turnTime: +b.dataset.v }); });
@@ -497,15 +543,8 @@
   // bodovi za prikaz: u trešeti bele (trećine), npr. 3⅔
   const ptsText = (g, b) => g.kind === 'treseta' ? T.fmt(b) : String(b);
 
-  let flyTimer = null, enterKeys = new Set();
-  function renderGame() {
-    const r = room, g = r.game, me = g.you;
-    const tre = g.kind === 'treseta';
-    // online: po pravilima se bodovi broje sami, pa se tijekom ruke ne prikazuju (samo ukupni rezultat)
-    const secret = !r.local;
-    const G = engOf(g.kind);
-    const myTurn = g.phase === 'play' && g.turn === me;
-    const now = Date.now();
+  // oblačići (znakovi, chat) iznad avatara i sistemske poruke
+  function gameBubbles(r, now) {
     const bubbles = {};
     for (const s of r.signals || []) {
       const t = seenSignals.get(s.id) || 0;
@@ -515,6 +554,21 @@
       const t = seenSignals.get(chatKey(r, m)) || 0;
       if (now - t < 4000 && !(bubbles[m.from] && (seenSignals.get(bubbles[m.from].id) || 0) > t)) bubbles[m.from] = { text: m.text.length > 40 ? m.text.slice(0, 40) + '…' : m.text, team: null, chat: true };
     }
+    const sysMsg = (r.signals || []).filter(s => s.from < 0 && now - (seenSignals.get(s.id) || 0) < 5000).pop();
+    return { bubbles, sysMsg };
+  }
+
+  let flyTimer = null, enterKeys = new Set();
+  function renderGame() {
+    if (room.game.kind === 'poker') return renderPoker();
+    const r = room, g = r.game, me = g.you;
+    const tre = g.kind === 'treseta';
+    // online: po pravilima se bodovi broje sami, pa se tijekom ruke ne prikazuju (samo ukupni rezultat)
+    const secret = !r.local;
+    const G = engOf(g.kind);
+    const myTurn = g.phase === 'play' && g.turn === me;
+    const now = Date.now();
+    const { bubbles, sysMsg } = gameBubbles(r, now);
     // trešeta: akuže se vide tijekom prvog štiha
     if (tre && g.trickNo <= 1 && g.phase === 'play' && g.akuze && g.akuze.length) {
       for (let p = 0; p < g.mode; p++) {
@@ -522,7 +576,6 @@
         if (a.length && !bubbles[p]) bubbles[p] = { text: 'Akuža: ' + a.map(x => x.text + ' (' + x.pts + ')').join(', '), team: null, akuza: true };
       }
     }
-    const sysMsg = (r.signals || []).filter(s => s.from < 0 && now - (seenSignals.get(s.id) || 0) < 5000).pop();
 
     const plate = (p) => {
       const pl = g.players[p];
@@ -594,7 +647,12 @@
     } else {
       deck = `<div class="trumpinfo">${Art.suit(g.trumpSuit, .85)}<span>briškula</span></div>`;
     }
-    if (!tre && secret) deck += `<div class="tscore pscore"><div class="muted">Rezultat (partije)</div>${winRows}</div>`;
+    if (r.tour && (tre ? g.mode !== 4 : secret || g.mode !== 4)) {
+      // turnir: umjesto broja pobjeda prikaži bodove turnira
+      const rows = g.players.map((_, i) => (me + i) % g.mode).map(q => `<div class="ts"><span>${q === me ? 'Ti' : esc(g.players[q].name.replace(/^Bot /, ''))}</span><b>${TR.fmt(r.tour.points[q])}</b></div>`).join('');
+      deck += `<div class="tscore pscore"><div class="muted">Turnir (bodovi)</div>${rows}</div>`;
+    }
+    else if (!tre && secret) deck += `<div class="tscore pscore"><div class="muted">Rezultat (partije)</div>${winRows}</div>`;
     else if (!tre && g.mode === 4) deck += `<div class="tscore pscore"><div class="muted">${pairHead}</div>${pairRows}</div>`;
 
     // štih
@@ -640,12 +698,12 @@
     </div>`;
 
     let tally = '';
-    if (r.wins && r.wins.some(x => x) && !(secret && !tre)) tally = g.mode === 4 ? ` · ${r.wins[me % 2]}:${r.wins[1 - me % 2]}` : ` · pobjede ${r.wins[me]}`;
+    if (r.wins && r.wins.some(x => x) && !(secret && !tre) && !r.tour) tally = g.mode === 4 ? ` · ${r.wins[me % 2]}:${r.wins[1 - me % 2]}` : ` · pobjede ${r.wins[me]}`;
 
     $app.innerHTML = `
       <div class="topbar">
         <button class="ghost small" id="leave">←</button>
-        <div class="mid">${(g.kind === 'treseta' || g.low ? MODE_SHORT : MODE_NAMES)[g.mode]}${kindLabel(g.kind || 'briskula', g.low)}${r.code ? ' · ' + esc(r.code) : (g.kind === 'treseta' && g.low ? '' : ' · ' + LEVEL_NAMES[r.level])}${tally}</div>
+        <div class="mid">${tourLabel(r.tour, g)}${(g.kind === 'treseta' || g.low || r.tour ? MODE_SHORT : MODE_NAMES)[g.mode]}${kindLabel(g.kind || 'briskula', g.low)}${r.code ? ' · ' + esc(r.code) : (g.kind === 'treseta' && g.low ? '' : ' · ' + LEVEL_NAMES[r.level])}${tally}</div>
         <button class="ghost small" id="last" ${g.lastTrick ? '' : 'disabled'}>Zadnji štih</button>
         ${chatBtn()}
         <button class="ghost small" id="menuBtn">⚙</button>
@@ -685,6 +743,252 @@
     if (Object.keys(bubbles).length || sysMsg) renderGame.bt = setTimeout(() => render(), 4100);
   }
 
+  // ---------- poker ----------
+  const pk = { key: '', open: false, amt: 0 }; // stanje gumba za povišenje
+  const chipsHtml = n => `<span class="chips">${n}</span>`;
+  const ACT_NAMES = { fold: 'Pas', check: 'Provjera', call: 'Prati', raise: 'Povišenje', bet: 'Ulog', sb: 'Mali blind', bb: 'Veliki blind' };
+  function pokerLastActs(g) {
+    // zadnji potez svakog igrača u ovom krugu ulaganja
+    const out = {};
+    for (const e of g.log) {
+      if (e.a === 'street' || e.a === 'end') { for (const k in out) if (out[k].a !== 'fold') delete out[k]; continue; }
+      if (e.p >= 0) out[e.p] = e;
+    }
+    return out;
+  }
+  function actText(e) {
+    if (!e) return '';
+    if (e.allIn && e.a !== 'fold') return 'All-in';
+    return ACT_NAMES[e.a] || '';
+  }
+  function renderPoker() {
+    const r = room, g = r.game, me = g.you;
+    const now = Date.now();
+    const L = g.legal;
+    const myTurn = !!L;
+    const { bubbles, sysMsg } = gameBubbles(r, now);
+    const bubble = p => bubbles[p] ? `<div class="bubble ${bubbles[p].chat ? 'chatb' : ''}">${esc(bubbles[p].text)}</div>` : '';
+    const acts = pokerLastActs(g);
+    const hr = g.phase === 'hand' || g.phase === 'over' ? g.handResult : null;
+    const winners = new Set(hr ? [].concat(...hr.pots.map(x => x.winners)) : []);
+    const plate = p => {
+      const pl = g.players[p];
+      const seat = r.seats[p];
+      const off = seat && !seat.bot && !seat.connected;
+      const turn = g.phase === 'play' && g.turn === p;
+      const who = seat || { name: pl.name };
+      const av = S.showCm
+        ? `<span class="avw">${avatar(Object.assign({}, who, { cm: 0 }), turn ? 'turn' : '', bubble(p) + turnRing(r, g, p))}<span class="cml ${who.cm ? '' : 'secret'}" title="Dužina pišulinca">${who.cm ? who.cm + ' cm' : 'tajna'}</span></span>`
+        : avatar(who, turn ? 'turn' : '', bubble(p) + turnRing(r, g, p));
+      return `<div class="pl pl-${p === me ? 'me' : posOf(p, g)} ${pl.folded || pl.out ? 'folded' : ''}">${av}<div class="nameplate ${turn ? 'turn' : ''}">
+        ${g.dealer === p ? '<span class="dealer" title="Djelitelj">D</span>' : ''}${esc(pl.name)}${off ? ' <span class="off">⚠</span>' : ''} ${pl.out ? '' : chipsHtml(pl.chips)}</div></div>`;
+    };
+    // ispod igrača: zadnji potez i ulog u ovom krugu
+    const betPill = p => {
+      const pl = g.players[p];
+      const tag = pl.out ? 'Ispao/la' : winners.has(p) ? 'Dobitak' : actText(acts[p]);
+      if (!tag && !pl.bet) return '';
+      return `<div class="pbet">${tag ? `<span class="act ${winners.has(p) ? 'won' : ''} ${pl.allIn && !pl.folded ? 'allin' : ''}">${tag}</span>` : ''}${pl.bet ? chipsHtml(pl.bet) : ''}</div>`;
+    };
+    const best = hr && hr.hands ? hr.hands : {};
+    let seats = '';
+    for (let p = 0; p < g.mode; p++) {
+      if (p === me) continue;
+      const pos = posOf(p, g), pl = g.players[p];
+      const shown = g.shown && g.shown[p];
+      const cards = pl.out ? '' : `<div class="pcards ${pl.folded ? 'folded' : ''}">${shown
+        ? shown.map(c => `<div class="card sm ${best[p] && best[p].best.includes(c) ? 'best' : ''}">${Art.face(c)}</div>`).join('')
+        : Array.from({ length: pl.handCount }, () => `<div class="card sm">${Art.back()}</div>`).join('')}</div>`;
+      const hn = shown && best[p] ? `<div class="hname">${esc(best[p].name)}</div>` : '';
+      seats += `<div class="seat ${pos}">${pos === 'top' ? cards + plate(p) + hn + betPill(p) : plate(p) + cards + hn + betPill(p)}</div>`;
+    }
+    // stol: 5 karata, lonac, blindovi
+    const myBest = best[me] ? best[me].best : (g.hand.length && g.board.length >= 3 ? P.bestFive(g.hand.concat(g.board)) : []);
+    const board = Array.from({ length: 5 }, (_, i) => g.board[i]
+      ? `<div class="card bc ${hr && myBest.includes(g.board[i]) && winners.has(me) ? 'best' : ''}">${Art.face(g.board[i])}</div>`
+      : '<div class="card bc slot"></div>').join('');
+    const potNow = g.pot;
+    const center = `<div class="pboard">
+        <div class="bcards">${board}</div>
+        <div class="pot">Lonac ${chipsHtml(potNow)}</div>
+      </div>`;
+    const blinds = `<div class="tscore pblinds"><div class="muted">Ruka ${g.handNo}</div>
+        <div class="ts"><span>Blindovi</span><b>${g.sb}/${g.bb}</b></div>
+        <div class="muted">${g.blindsIn === 1 ? 'rastu od sljedeće ruke' : 'rastu za ' + g.blindsIn + ' ruke'}</div></div>`;
+
+    // poruka
+    let status = '';
+    const streetName = ['Prije flopa', 'Flop', 'Turn', 'River'][g.street] || '';
+    if (g.phase === 'play') status = (myTurn ? 'Na potezu si' : 'Igra ' + esc(g.players[g.turn].name) + '…') + ' · ' + streetName + (r.turnDeadline ? ` · ⏱ <b class="ttn" data-dl="${r.turnDeadline}">${Math.max(0, Math.ceil((r.turnDeadline - now) / 1000))}</b> s` : '');
+    else if (g.phase === 'collect') status = g.players.filter(pl => !pl.out && !pl.folded && !pl.allIn).length <= 1 ? 'Otkrivanje karata…' : streetName + ' gotov…';
+    else if (hr) status = hr.pots.map(x => x.winners.map(w => esc(g.players[w].name)).join(' i ') + ' nosi ' + x.amount + (x.hand ? ' · ' + esc(x.hand) : '')).join(' · ');
+    if (sysMsg) status = esc(sysMsg.text);
+
+    // moje karte i potezi
+    const mine = g.players[me];
+    const hand = g.hand.slice().sort((a, b) => P.pv(b) - P.pv(a));
+    const handHtml = hand.map(c => `<div class="card ${hr && myBest.includes(c) && winners.has(me) ? 'best' : ''} ${mine.folded ? 'dim' : ''}">${Art.face(c)}</div>`).join('');
+    const myHandName = g.hand.length === 2 && g.board.length >= 3 && !mine.folded ? P.handName(P.evaluate(g.hand.concat(g.board))) : '';
+    let actions = '';
+    if (myTurn) {
+      const key = g.handNo + ':' + g.trickNo;
+      if (pk.key !== key) { pk.key = key; pk.open = false; pk.amt = L.minTo; }
+      pk.amt = Math.max(L.minTo, Math.min(L.maxTo, pk.amt));
+      const potAfter = potNow + L.toCall;
+      const pre = [['Min', L.minTo], ['½ lonca', L.bet + L.toCall + Math.round(potAfter / 2)], ['Lonac', L.bet + L.toCall + potAfter]]
+        .map(([t, v]) => [t, Math.max(L.minTo, Math.min(L.maxTo, v))]);
+      const raiseWord = L.curBet ? 'Povisi' : 'Uloži';
+      actions = `<div class="pact">
+        <button class="ghost fold" data-act="fold">Odustani</button>
+        <button class="${L.check ? 'ghost' : ''}" data-act="${L.check ? 'check' : 'call'}">${L.check ? 'Provjeri' : L.toCall >= mine.chips ? 'Prati (all-in ' + L.toCall + ')' : 'Prati ' + L.toCall}</button>
+        ${L.canRaise ? `<button data-act="open" class="${pk.open ? 'on' : ''}">${raiseWord}…</button>` : ''}
+      </div>
+      ${L.canRaise && pk.open ? `<div class="praise">
+        <div class="row"><input type="range" id="raiseR" min="${L.minTo}" max="${L.maxTo}" step="${Math.max(1, Math.min(g.sb, L.maxTo - L.minTo))}" value="${pk.amt}"><b id="raiseV">${pk.amt}</b></div>
+        <div class="row pre">${pre.map(([t, v]) => `<button class="ghost small" data-to="${v}">${t}</button>`).join('')}<button class="ghost small" data-to="${L.maxTo}">Sve</button></div>
+        <button id="raiseGo" style="width:100%">${raiseWord} na <span id="raiseV2">${pk.amt}</span>${pk.amt >= L.maxTo ? ' (all-in)' : ''}</button>
+      </div>` : ''}`;
+    } else if (g.phase !== 'over' && g.phase !== 'hand') {
+      actions = `<div class="signals">${['👍', '😂', '😮', '🙈', '😤', '🤑'].map(t => `<button class="ghost" data-sig="${t}">${t}</button>`).join('')}</div>`;
+    }
+    const myInfo = mine.out ? '<div class="hname">Ispao/la si – gledaš do kraja</div>' : myHandName ? `<div class="hname">${esc(myHandName)}</div>` : '';
+
+    let tally = '';
+    if (r.wins && r.wins.some(x => x) && !r.tour) tally = ` · pobjede ${r.wins[me]}`;
+    $app.innerHTML = `
+      <div class="topbar">
+        <button class="ghost small" id="leave">←</button>
+        <div class="mid">${tourLabel(r.tour, g)}Poker · ${modeName('poker', g.mode, true)}${r.code ? ' · ' + esc(r.code) : ' · ' + LEVEL_NAMES[r.level]}${tally}</div>
+        ${chatBtn()}
+        <button class="ghost small" id="menuBtn">⚙</button>
+      </div>
+      <div class="table poker mode${g.mode} ${g.mode >= 3 ? 'has-left' : ''}">
+        ${seats}${blinds}${center}
+        <div class="status">${status}</div>
+      </div>
+      <div class="me poker">
+        ${betPill(me)}
+        <div class="hand">${handHtml}</div>
+        <div class="mypl">${plate(me)}${myInfo}</div>
+        ${actions ? `<div class="pctl">${actions}</div>` : ''}
+      </div>`;
+
+    $app.querySelector('#leave').onclick = () => { if (g.phase === 'over' || confirmLeave()) leave(); };
+    $app.querySelector('#menuBtn').onclick = () => { modal = 'settings'; render(); };
+    bindChatBtn();
+    $app.querySelectorAll('[data-act]').forEach(b => b.onclick = () => {
+      const a = b.dataset.act;
+      if (a === 'open') { pk.open = !pk.open; return render(); }
+      ctrl.play(a);
+    });
+    const rr = $app.querySelector('#raiseR');
+    const setAmt = v => {
+      pk.amt = Math.max(L.minTo, Math.min(L.maxTo, Math.round(+v)));
+      if (rr) rr.value = pk.amt;
+      $app.querySelector('#raiseV').textContent = pk.amt;
+      $app.querySelector('#raiseGo').innerHTML = `${L.curBet ? 'Povisi' : 'Uloži'} na <span id="raiseV2">${pk.amt}</span>${pk.amt >= L.maxTo ? ' (all-in)' : ''}`;
+    };
+    if (rr) rr.oninput = () => setAmt(rr.value);
+    $app.querySelectorAll('[data-to]').forEach(b => b.onclick = () => setAmt(b.dataset.to));
+    const go = $app.querySelector('#raiseGo');
+    if (go) go.onclick = () => { pk.open = false; ctrl.play(pk.amt >= L.maxTo ? 'allin' : 'raise:' + pk.amt); };
+    $app.querySelectorAll('[data-sig]').forEach(b => b.onclick = () => {
+      const k = Date.now(); if (k - (renderGame.lastSig || 0) < 1500) return; renderGame.lastSig = k;
+      ctrl.signal(b.dataset.sig, false);
+    });
+    clearTimeout(renderGame.bt);
+    if (Object.keys(bubbles).length || sysMsg) renderGame.bt = setTimeout(() => render(), 4100);
+  }
+
+  const placeText = k => k + '. mjesto';
+  function pokerHandHtml() {
+    const r = room, g = r.game, me = g.you, hr = g.handResult;
+    if (!hr) return '';
+    const order = g.players.map((_, i) => (me + i) % g.mode).filter(p => hr.delta[p] !== 0 || hr.hands[p] || !g.players[p].out || hr.busted.includes(p));
+    const rows = order.map(p => {
+      const pl = g.players[p], h = hr.hands[p], cards = g.shown && g.shown[p];
+      const d = hr.delta[p];
+      return `<tr class="${hr.won[p] ? 'win' : ''}"><td>${esc(pl.name)}${p === me ? ' (ti)' : ''}
+          <div class="muted ak">${h ? esc(h.name) : pl.folded && !pl.out ? 'odustao/la' : hr.busted.includes(p) ? 'ispao/la' : ''}</div></td>
+        <td class="hc2">${cards ? cards.map(c => `<div class="card xs ${h && h.best.includes(c) ? 'best' : ''}">${Art.face(c)}</div>`).join('') : ''}</td>
+        <td class="${d > 0 ? 'plus' : d < 0 ? 'minus' : ''}">${d > 0 ? '+' + d : d < 0 ? '−' + -d : '0'}</td><td class="tot">${pl.chips}</td></tr>`;
+    }).join('');
+    const potsTxt = hr.pots.map((x, i) => `${hr.pots.length > 1 ? (i ? 'Sporedni lonac' : 'Glavni lonac') : 'Lonac'} ${x.amount}: <b>${x.winners.map(w => esc(g.players[w].name)).join(' i ')}</b>${x.hand ? ' – ' + esc(x.hand) : ''}`).join('<br>');
+    const out = g.players[me].out;
+    const myReady = !r.local && (r.ready || []).includes(me);
+    const humans = r.local ? 1 : r.seats.filter((s, i) => s && !s.bot && s.connected && !g.players[i].out).length;
+    const bustNote = hr.busted.length ? `<p class="forfeit">${hr.busted.map(p => p === me ? 'Ostao/la si bez žetona' : esc(g.players[p].name) + ' ispada').join(' · ')}.</p>` : '';
+    const btn = out
+      ? (r.local ? '<button id="nextHand" style="width:100%">Odigraj do kraja (botovi)</button>' : '<p class="muted" style="text-align:center">Gledaš do kraja, sljedeća ruka počinje za nekoliko sekundi.</p>')
+      : !myReady ? '<button id="nextHand" style="width:100%">Sljedeća ruka</button>' : `<p class="muted" style="text-align:center">Čeka se ostale (${(r.ready || []).length}/${humans})… Sljedeća ruka počinje za nekoliko sekundi.</p>`;
+    return `<h2>Kraj ${hr.handNo}. ruke</h2>
+      <div class="pboard-sm">${hr.board.map(c => `<div class="card xs">${Art.face(c)}</div>`).join('')}</div>
+      <p style="text-align:center;margin:8px 0">${potsTxt}</p>
+      ${bustNote}
+      <table class="scores hand-table ptable"><tr class="th"><td></td><td>Karte</td><td>+/−</td><td>Žetoni</td></tr>${rows}</table>
+      ${btn}`;
+  }
+  function pokerResultHtml() {
+    const r = room, g = r.game, res = g.result, me = g.you;
+    const myPlace = res.place.indexOf(me) + 1;
+    const title = myPlace === 1 ? 'Pobijedio/la si!' : placeText(myPlace);
+    const rows = res.place.map((p, k) => `<tr class="${k === 0 ? 'win' : ''}"><td>${k + 1}. ${esc(g.players[p].name)}${p === me ? ' (ti)' : ''}</td><td>${g.players[p].chips}</td></tr>`).join('');
+    const tally = 'Pobjede: ' + r.seats.map((s, i) => esc(s.name) + ' ' + (r.wins[i] || 0)).join(' · ');
+    const canRestart = r.local || r.host;
+    return `<div class="result-big">${title}</div>
+      ${res.forfeit != null ? forfeitNote(g, res) : `<p class="muted" style="text-align:center">${esc(g.players[res.winners[0]].name)} je pokupio/la sve žetone (${res.hands.length} ruku).</p>`}
+      <table class="scores">${rows}</table>
+      ${r.tour ? '' : `<p class="muted" style="text-align:center">${tally}</p>`}
+      ${tourTable(r)}${againHtml(r, canRestart)}
+      <div class="row" style="margin-top:8px">${!r.local && r.host ? '<button class="ghost" id="lobby">Natrag u sobu</button>' : ''}<button class="ghost" id="out">Izlaz</button></div>`;
+  }
+  function pokerRulesHtml() {
+    return `<div class="rules"><h2>Pravila pokera</h2>
+      <p>Igra se <b>Texas Hold'em</b> s 40 karata briškule. Za poker je redoslijed <b>2, 3, 4, 5, 6, 7, fanat, konj, kralj, as</b> (fanat je kao dečko, konj kao dama). As može biti i najniži (skala A-2-3-4-5), a 7-fanat-konj-kralj-as je najviša skala.</p>
+      <ul>
+        <li>Svatko dobije <b>2 karte</b>. Na stol se otvaraju 3 karte (flop), pa jedna (turn) i još jedna (river). Najbolja ruka od 5 karata (od svojih 2 i 5 na stolu) nosi lonac.</li>
+        <li>Svi počinju s <b>${P.START_CHIPS} žetona</b>. Dvojica lijevo od djelitelja (D) ulažu mali i veliki blind, koji <b>rastu svakih ${P.BLIND_EVERY} ruku</b>.</li>
+        <li>Na potezu možeš <b>odustati</b>, <b>provjeriti</b> (kad nema uloga), <b>pratiti</b> ili <b>povisiti</b> (bez limita, do all-ina). Tko ostane bez žetona, ispada. Pobjeđuje zadnji sa žetonima.</li>
+        <li><b>Jačina ruku</b> (od najslabije): visoka karta, par, dva para, <b>skala</b>, <b>tris</b>, <b>ful</b>, <b>boja</b>, poker (četiri iste), skala u boji.</li>
+        <li>Jer u špilu nema 8, 9 i 10, skala je češća od trisa, a ful češći od boje, pa je ovdje <b>tris jači od skale</b>, a <b>boja jača od fula</b> (kao u „short deck” pokeru).</li>
+        <li>U online igri, tko ne odigra na vrijeme provjeri (ako može) ili odustane od te ruke.</li>
+      </ul>
+      <button id="close" style="width:100%">Zatvori</button></div>`;
+  }
+
+  // ---------- turnir ----------
+  const ordinal = k => k + '.';
+  function tourTable(r, lobby) {
+    const t = r.tour;
+    if (!t) return '';
+    const me = r.you;
+    const head = t.stages.map((k, i) => `<td title="${TR.NAMES[k]}">${i < t.results.length ? TOUR_ABBR[k] : `<span class="muted">${TOUR_ABBR[k]}</span>`}</td>`).join('');
+    const rows = TR.standings(t).map(x => {
+      const s = r.seats[x.p];
+      const cells = t.stages.map((_, i) => { const res = t.results[i]; return `<td>${res ? TR.fmt(res.pts[x.p]) : '–'}</td>`; }).join('');
+      return `<tr class="${t.done && x.place === 1 ? 'win' : ''}"><td>${ordinal(x.place)} ${esc(s ? s.name : '')}${x.p === me ? ' (ti)' : ''}</td>${cells}<td class="tot">${TR.fmt(x.points)}</td></tr>`;
+    }).join('');
+    const title = t.done ? 'Konačni poredak turnira' : `Turnir nakon ${t.results.length}. igre`;
+    return `<div class="tour ${lobby ? 'lobby' : ''}"><div class="tour-h">${title}</div>
+      <table class="scores small ttable"><tr class="th"><td></td>${head}<td>Ukupno</td></tr>${rows}</table></div>`;
+  }
+  function againHtml(r, canRestart) {
+    const t = r.tour;
+    let label = 'Nova partija', wait = 'Čeka se domaćin za novu partiju…', banner = '';
+    if (t) {
+      if (t.done) {
+        const st = TR.standings(t), mine = st.find(x => x.p === r.you);
+        const winners = st.filter(x => x.place === 1).map(x => esc(r.seats[x.p].name));
+        banner = `<div class="tour-win">🏆 ${mine && mine.place === 1 ? (winners.length > 1 ? 'Dijeliš pobjedu u turniru!' : 'Pobijedio/la si turnir!') : 'Turnir je osvojio/la ' + winners.join(' i ') + (mine ? ` · ti si ${mine.place}. mjesto` : '')}</div>`;
+        label = 'Novi turnir'; wait = 'Čeka se domaćin za novi turnir…';
+      } else {
+        label = 'Sljedeća igra: ' + TR.NAMES[TR.stageKind(t)];
+        wait = 'Čeka se domaćin za sljedeću igru (' + TR.NAMES[TR.stageKind(t)] + ')…';
+      }
+    }
+    return banner + (canRestart ? `<button id="again" style="width:100%">${label}</button>` : `<p class="muted" style="text-align:center">${wait}</p>`);
+  }
+
   function confirmLeave() {
     if (window.BRK_OFFLINE) return true;
     return window.confirm(room.local ? 'Prekinuti partiju?' : 'Napustiti igru? Bot će igrati umjesto tebe.');
@@ -714,8 +1018,8 @@
       <div class="lasttrick">${g.lastTrick.cards.map(t => `<div style="text-align:center"><div class="card">${Art.face(t.card)}</div><div class="muted">${esc(g.players[t.p].name)}</div></div>`).join('')}</div>
       <p style="text-align:center">Nosi: <b>${esc(g.players[g.lastTrick.winner].name)}</b>${room.local ? ` (+${ptsText(g, g.lastTrick.points)})` : ''}${g.lastTrick.last ? ' · zadnji štih' : ''}</p>
       <button id="close" style="width:100%">Zatvori</button>`;
-    else if (g && g.phase === 'over') html = g.kind === 'treseta' ? tresetaResultHtml() : resultHtml();
-    else if (g && g.phase === 'hand') html = handEndHtml();
+    else if (g && g.phase === 'over') html = g.kind === 'poker' ? pokerResultHtml() : g.kind === 'treseta' ? tresetaResultHtml() : resultHtml();
+    else if (g && g.phase === 'hand') html = g.kind === 'poker' ? pokerHandHtml() : handEndHtml();
     if (!html) { if (el) el.remove(); return; }
     if (!el) { el = document.createElement('div'); el.id = 'overlay'; el.className = 'overlay'; document.body.appendChild(el); }
     el.innerHTML = `<div class="modal">${html}</div>`;
@@ -762,8 +1066,8 @@
     return `<div class="result-big">${title}</div>
       ${lowNote}
       <table class="scores">${rows}</table>
-      <p class="muted" style="text-align:center">${tally}</p>
-      ${canRestart ? '<button id="again" style="width:100%">Nova partija</button>' : '<p class="muted" style="text-align:center">Čeka se domaćin za novu partiju…</p>'}
+      ${r.tour ? '' : `<p class="muted" style="text-align:center">${tally}</p>`}
+      ${tourTable(r)}${againHtml(r, canRestart)}
       <div class="row" style="margin-top:8px">${!r.local && r.host ? '<button class="ghost" id="lobby">Natrag u sobu</button>' : ''}<button class="ghost" id="out">Izlaz</button></div>`;
   }
 
@@ -806,8 +1110,8 @@
       <table class="scores">${rows}</table>
       <details class="hist"><summary class="muted">Bodovi po rukama</summary>
         <table class="scores small"><tr class="th"><td>Ruka</td>${head}</tr>${hist}</table></details>
-      <p class="muted" style="text-align:center">${tally}</p>
-      ${canRestart ? '<button id="again" style="width:100%">Nova partija</button>' : '<p class="muted" style="text-align:center">Čeka se domaćin za novu partiju…</p>'}
+      ${r.tour ? '' : `<p class="muted" style="text-align:center">${tally}</p>`}
+      ${tourTable(r)}${againHtml(r, canRestart)}
       <div class="row" style="margin-top:8px">${!r.local && r.host ? '<button class="ghost" id="lobby">Natrag u sobu</button>' : ''}<button class="ghost" id="out">Izlaz</button></div>`;
   }
 
@@ -828,7 +1132,13 @@
   }
 
   function rulesHtml() {
-    if ((room ? room.kind : S.kind) === 'treseta') return tresetaRulesHtml();
+    const rk = room ? room.kind : S.kind;
+    if (rk === 'treseta') return tresetaRulesHtml();
+    if (rk === 'poker') return pokerRulesHtml();
+    if (rk === 'turnir') return `<div class="rules"><h2>Turnir</h2><p>${KIND_DESC.turnir}</p>
+      <p>Na kraju pobjeđuje tko ima najviše bodova; ako je izjednačeno, odlučuje bolji plasman u pokeru. U turniru blindovi u pokeru rastu svake ${TOUR_BLINDS} ruke.</p>
+      <p class="muted">Pravila pojedine igre vidiš tijekom te igre (⚙ → Pravila) ili kad u izborniku odabereš tu igru.</p>
+      <button id="close" style="width:100%">Zatvori</button></div>`;
     return `<div class="rules"><h2>Pravila briškule</h2>
       <p>Igra se s 40 karata u četiri boje: <b>kupe, dinari, špade i bate</b>. Jačina karata od najjače: <b>as, trica, kralj, konj, fanat</b>, pa 7, 6, 5, 4, 2.</p>
       <p>Bodovi: as 11, trica 10, kralj 4, konj 3, fanat 2, ostale 0. Ukupno ima 120 bodova, a pobjeđuje tko skupi više od 60 (60:60 je neriješeno).</p>

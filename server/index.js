@@ -10,12 +10,18 @@ const B = require('../public/bot.js');
 const T = require('../public/treseta.js');
 const TB = require('../public/treseta-bot.js');
 const AV = require('../public/avatars.js');
+const P = require('../public/poker.js');
+const PB = require('../public/poker-bot.js');
+const TR = require('../public/turnir.js');
 // igra: briškula ili trešeta; low = "Chi fa meno" (na manje) za obje
 // (stari klijenti šalju kind 'meno' = briškula na manje)
-const kindOf = m => m.kind === 'treseta' ? 'treseta' : 'briskula';
-const lowOf = m => !!m.low || m.kind === 'meno';
-const engOf = r => r.kind === 'treseta' ? T : E;
-const botOf = r => r.kind === 'treseta' ? TB : B;
+const kindOf = m => m.kind === 'treseta' || m.kind === 'poker' || m.kind === 'turnir' ? m.kind : 'briskula';
+const lowOf = m => m.kind !== 'poker' && m.kind !== 'turnir' && (!!m.low || m.kind === 'meno');
+const engOf = r => r.kind === 'treseta' ? T : r.kind === 'poker' ? P : E;
+const botOf = r => r.kind === 'treseta' ? TB : r.kind === 'poker' ? PB : B;
+// strana (za brojanje pobjeda): u pokeru svatko igra za sebe, i u četvero
+const sideOf = (r, p) => r.kind === 'poker' ? p : E.teamOf(r.mode, p);
+const sideCount = r => r.mode === 4 && r.kind !== 'poker' ? 2 : r.mode;
 
 const PORT = process.env.PORT || 3000;
 const PUB = path.join(__dirname, '..', 'public');
@@ -52,11 +58,12 @@ const turnTimeOf = v => TURN_TIMES.includes(+v) ? +v : TURN_DEFAULT;
 const PACE = {
   briskula: { trick: 1400, bot: 750, botRnd: 400 },
   treseta: { trick: 1050, bot: 450, botRnd: 300 },
+  poker: { trick: 1100, bot: 800, botRnd: 700 }, // trick = pauza prije sljedeće karte na stolu
 };
 const PACE_SCALE = +process.env.BRK_PACE_SCALE || 1; // samo za testove
 for (const k in PACE) for (const f in PACE[k]) PACE[k][f] *= PACE_SCALE;
-const pace = r => PACE[r.kind === 'treseta' ? 'treseta' : 'briskula'];
-const HAND_PAUSE = 9000, AWAY_AUTOPLAY = 25000, ROOM_TTL = 30 * 60 * 1000;
+const pace = r => PACE[r.kind] || PACE.briskula;
+const HAND_PAUSE = 9000, POKER_PAUSE = 7000, AWAY_AUTOPLAY = 25000, ROOM_TTL = 30 * 60 * 1000;
 
 function code() {
   const A = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -106,12 +113,22 @@ function createRoom(mode, host, opts) {
   const r = {
     code: code(), mode, seats: Array(mode).fill(null), host, game: null, timer: null,
     level: ['easy', 'normal', 'hard'].includes(opts.level) ? opts.level : 'normal',
-    isPublic: !!opts.isPublic, kind: opts.kind || 'briskula', low: !!opts.low, target: T.TARGETS.includes(+opts.target) ? +opts.target : 41, signals: [], chat: [], chatSeq: 0, wins: Array(mode === 4 ? 2 : mode).fill(0), touched: Date.now(), awayTimer: null,
+    isPublic: !!opts.isPublic, kind: opts.kind || 'briskula', low: !!opts.low, tour: null, target: T.TARGETS.includes(+opts.target) ? +opts.target : 41, signals: [], chat: [], chatSeq: 0, wins: null, touched: Date.now(), awayTimer: null,
     turnTime: turnTimeOf(opts.turnTime), turnTimer: null, turnKey: null, turnEnds: 0,
   };
+  setKind(r, r.kind, r.low);
   rooms.set(r.code, r);
   return r;
 }
+
+// vrsta igre u sobi; 'turnir' = niz igara (briškula → trešeta → poker), r.kind je trenutna igra
+function setKind(r, kind, low) {
+  if (kind === 'turnir') { r.tour = TR.newTour(r.mode); r.kind = TR.stageKind(r.tour); r.low = false; }
+  else { r.tour = null; r.kind = kind; r.low = !!low; }
+  r.wins = Array(sideCount(r)).fill(0);
+}
+const TOUR_BLINDS = 4; // u turniru blindovi u pokeru rastu brže
+const tourBusy = r => r.tour && r.tour.idx > 0 && !r.tour.done;
 
 function seatOf(r, token) { return r.seats.findIndex(s => s && s.token === token); }
 
@@ -183,7 +200,7 @@ function roomView(r, token) {
   const tl = turnLeft(r);
   return {
     type: 'room', imgs, turnTime: r.turnTime, turnLeft: tl,
-    code: r.code, mode: r.mode, level: r.level, isPublic: r.isPublic, low: r.low, kind: r.kind, target: r.target,
+    code: r.code, mode: r.mode, level: r.level, isPublic: r.isPublic, low: r.low, kind: r.kind, target: r.target, tour: r.tour,
     host: r.host === token, you, wins: r.wins,
     seats,
     game: g ? engOf(r).viewFor(g, you) : null,
@@ -195,15 +212,29 @@ function roomView(r, token) {
 
 function broadcast(r) {
   r.touched = Date.now();
+  // kraj partije: jednom upiši pobjedu (poker može završiti i usred ulaganja, kad svi odustanu)
+  const g = r.game;
+  if (g && g.phase === 'over' && r.counted !== g) {
+    r.counted = g;
+    if (!g.result.draw && g.result.forfeit == null) r.wins[sideOf(r, g.result.winners[0])]++;
+    if (r.tour && !r.tour.done) TR.record(r.tour, r.kind, g.result);
+  }
   turnTimer(r); // pokreni/zaustavi timer za potez prije slanja, da klijenti vide odbrojavanje
   for (const s of r.seats) if (s && !s.bot) { const c = clients.get(s.token); if (c && c.room === r.code) send(c.ws, roomView(r, s.token)); }
 }
 
 function startGame(r) {
   if (r.seats.some(s => !s)) return false;
-  const prevDealer = r.game ? r.game.dealer : -1;
-  const o = { names: r.seats.map(s => s.name), bots: r.seats.map(s => !!s.bot), dealer: prevDealer + 1 };
-  r.game = r.kind === 'treseta' ? T.newGame(r.mode, Object.assign(o, { target: r.target, low: r.low })) : E.newGame(r.mode, Object.assign(o, { low: r.low }));
+  // turnir: sljedeća igra u nizu (nakon zadnje počinje novi turnir)
+  if (r.tour) {
+    if (r.tour.done) r.tour = TR.newTour(r.mode);
+    const k = TR.stageKind(r.tour);
+    if (k !== r.kind) { r.kind = k; r.wins = Array(sideCount(r)).fill(0); }
+  }
+  const prevDealer = r.game && r.game.kind === r.kind ? r.game.dealer : -1;
+  const o = { names: r.seats.map(s => s.name), bots: r.seats.map(s => !!s.bot), dealer: prevDealer + 1, blindEvery: r.tour ? TOUR_BLINDS : undefined };
+  if (r.kind === 'poker') r.game = P.newGame(r.mode, o);
+  else r.game = r.kind === 'treseta' ? T.newGame(r.mode, Object.assign(o, { target: r.target, low: r.low })) : E.newGame(r.mode, Object.assign(o, { low: r.low }));
   r.signals = []; r.ready = new Set();
   broadcast(r); schedule(r);
   return true;
@@ -227,7 +258,21 @@ function turnTimer(r) {
   r.turnKey = key;
   const ms = r.turnTime * 1000 * TURN_SCALE;
   r.turnEnds = Date.now() + ms;
-  r.turnTimer = setTimeout(() => { r.turnTimer = null; if (r.turnKey === key && timedTurn(r)) forfeit(r, g.turn); }, ms + TURN_GRACE * TURN_SCALE);
+  r.turnTimer = setTimeout(() => {
+    r.turnTimer = null;
+    if (r.turnKey !== key || !timedTurn(r)) return;
+    if (r.kind === 'poker') pokerTimeout(r, g.turn); else forfeit(r, g.turn);
+  }, ms + TURN_GRACE * TURN_SCALE);
+}
+
+// poker: tko ne odigra na vrijeme, provjerava (ako može) ili odustaje od ruke; partija ide dalje
+function pokerTimeout(r, p) {
+  const g = r.game;
+  const L = P.legal(g, p);
+  if (!L) return;
+  P.play(g, p, L.check ? 'check' : 'fold');
+  pushSignal(r, -1, g.players[p].name + ' nije odigrao/la na vrijeme' + (L.check ? ' (provjera).' : ' i odustaje od ruke.'));
+  broadcast(r); schedule(r);
 }
 
 // igrač nije odigrao na vrijeme: partija je gotova, njegova strana gubi
@@ -243,6 +288,8 @@ function forfeit(r, p) {
   g.phase = 'over';
   g.result = { scores, winners, draw: false, low: !!r.low, forfeit: p, hands: (g.hands || []).slice(), target: g.target };
   teams.forEach((_, t) => { if (t !== lost) r.wins[t]++; });
+  r.counted = g;
+  if (r.tour && !r.tour.done) TR.record(r.tour, r.kind, g.result);
   pushSignal(r, -1, g.players[p].name + ' nije odigrao/la na vrijeme. Partija je gotova.');
   broadcast(r);
 }
@@ -255,15 +302,12 @@ function schedule(r) {
   if (g.phase === 'collect') {
     r.timer = setTimeout(() => {
       engOf(r).collect(g);
-      if (g.phase === 'over') {
-        const res = g.result;
-        if (!res.draw) r.wins[E.teamOf(r.mode, res.winners[0])]++;
-      }
       broadcast(r); schedule(r);
     }, pace(r).trick);
   } else if (g.phase === 'hand') {
-    // kraj ruke u trešeti: kratka pauza za pregled bodova, pa nova ruka
-    r.timer = setTimeout(() => nextHand(r), HAND_PAUSE);
+    // kraj ruke (trešeta, poker): kratka pauza za pregled bodova, pa nova ruka
+    if (r.kind === 'poker' && !pokerHumans(r).length) return pokerFinish(r);
+    r.timer = setTimeout(() => nextHand(r), r.kind === 'poker' ? POKER_PAUSE : HAND_PAUSE);
   } else if (g.phase === 'play') {
     const s = r.seats[g.turn];
     const c = s && !s.bot ? clients.get(s.token) : null;
@@ -273,10 +317,20 @@ function schedule(r) {
   }
 }
 
+// poker: ljudi koji su još u igri (nisu ispali)
+function pokerHumans(r) {
+  return r.seats.map((s, i) => s && !s.bot && !r.game.players[i].out ? i : -1).filter(i => i >= 0);
+}
+// svi ljudi su ispali: botovi odigraju ostatak odmah, da se zna poredak
+function pokerFinish(r) {
+  PB.finish(r.game, r.level);
+  broadcast(r);
+}
+
 function nextHand(r) {
   const g = r.game;
   if (!g || g.phase !== 'hand') return;
-  T.nextHand(g); r.signals = []; r.ready = new Set();
+  engOf(r).nextHand(g); r.signals = []; r.ready = new Set();
   broadcast(r); schedule(r);
 }
 
@@ -339,7 +393,7 @@ wss.on('connection', ws => {
         const mode = +m.mode;
         if (![2, 3, 4].includes(mode)) return err('Neispravan način igre.');
         const kind = kindOf(m), low = lowOf(m);
-        let nr = [...rooms.values()].find(x => x.isPublic && x.mode === mode && x.kind === kind && x.low === low && !x.game && x.seats.includes(null) && seatOf(x, token) < 0);
+        let nr = [...rooms.values()].find(x => x.isPublic && x.mode === mode && (kind === 'turnir' ? !!x.tour && !tourBusy(x) : !x.tour && x.kind === kind && x.low === low) && !x.game && x.seats.includes(null) && seatOf(x, token) < 0);
         if (!nr) { leaveCurrent(token); nr = createRoom(mode, token, { isPublic: true, kind, low }); }
         joinRoom(nr, token);
         if (!nr.seats.includes(null)) startGame(nr); else broadcast(nr);
@@ -348,6 +402,7 @@ wss.on('connection', ws => {
       case 'leave': leaveCurrent(token); send(ws, { type: 'left' }); break;
       case 'seat': {
         if (!r || (r.game && r.game.phase !== 'over')) return;
+        if (tourBusy(r)) return err('Tijekom turnira mjesta se ne mijenjaju (bodovi pripadaju mjestu).');
         const from = seatOf(r, token), to = +m.seat;
         if (from < 0 || !(to >= 0 && to < r.mode) || to === from) return;
         const t = r.seats[to];
@@ -357,7 +412,7 @@ wss.on('connection', ws => {
       }
       case 'addBot': if (r && r.host === token && !r.game) { addBot(r); broadcast(r); } break;
       case 'kick': if (r && r.host === token && !r.game) { const s = r.seats[+m.seat]; if (s && s.bot) { r.seats[+m.seat] = null; broadcast(r); } } break;
-      case 'variant': if (r && r.host === token && !r.isPublic && (!r.game || r.game.phase === 'over')) { r.kind = kindOf(m); r.low = lowOf(m); r.game = null; r.wins = r.wins.map(() => 0); broadcast(r); } break;
+      case 'variant': if (r && r.host === token && !r.isPublic && (!r.game || r.game.phase === 'over')) { setKind(r, kindOf(m), lowOf(m)); r.game = null; broadcast(r); } break;
       case 'target': if (r && r.host === token && T.TARGETS.includes(+m.target) && (!r.game || r.game.phase === 'over')) { r.target = +m.target; r.game = null; broadcast(r); } break;
       case 'next': {
         // kraj ruke: svatko pritisne "Dalje"; kad su svi spremni, odmah nova ruka (inače nakon HAND_PAUSE)
@@ -366,7 +421,7 @@ wss.on('connection', ws => {
         if (i < 0) break;
         if (!r.ready) r.ready = new Set();
         r.ready.add(i);
-        const humans = r.seats.map((x, q) => x && !x.bot && clients.get(x.token) && clients.get(x.token).ws ? q : -1).filter(q => q >= 0);
+        const humans = r.seats.map((x, q) => x && !x.bot && clients.get(x.token) && clients.get(x.token).ws && !(r.kind === 'poker' && r.game.players[q].out) ? q : -1).filter(q => q >= 0);
         if (humans.every(q => r.ready.has(q))) nextHand(r); else broadcast(r);
         break;
       }
@@ -382,7 +437,7 @@ wss.on('connection', ws => {
       case 'play': {
         if (!r || !r.game) return;
         const p = seatOf(r, token);
-        if (engOf(r).play(r.game, p, String(m.card))) { broadcast(r); schedule(r); }
+        if (engOf(r).play(r.game, p, String(m.card).slice(0, 20))) { broadcast(r); schedule(r); }
         break;
       }
       case 'signal': {

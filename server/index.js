@@ -9,8 +9,10 @@ const E = require('../public/engine.js');
 const B = require('../public/bot.js');
 const T = require('../public/treseta.js');
 const TB = require('../public/treseta-bot.js');
-const KINDS = ['briskula', 'meno', 'treseta'];
-const kindOf = m => KINDS.includes(m.kind) ? m.kind : (m.low ? 'meno' : 'briskula');
+// igra: briškula ili trešeta; low = "Chi fa meno" (na manje) za obje
+// (stari klijenti šalju kind 'meno' = briškula na manje)
+const kindOf = m => m.kind === 'treseta' ? 'treseta' : 'briskula';
+const lowOf = m => !!m.low || m.kind === 'meno';
 const engOf = r => r.kind === 'treseta' ? T : E;
 const botOf = r => r.kind === 'treseta' ? TB : B;
 
@@ -56,7 +58,7 @@ function createRoom(mode, host, opts) {
   const r = {
     code: code(), mode, seats: Array(mode).fill(null), host, game: null, timer: null,
     level: ['easy', 'normal', 'hard'].includes(opts.level) ? opts.level : 'normal',
-    isPublic: !!opts.isPublic, kind: opts.kind || 'briskula', target: T.TARGETS.includes(+opts.target) ? +opts.target : 41, signals: [], chat: [], chatSeq: 0, wins: Array(mode === 4 ? 2 : mode).fill(0), touched: Date.now(), awayTimer: null,
+    isPublic: !!opts.isPublic, kind: opts.kind || 'briskula', low: !!opts.low, target: T.TARGETS.includes(+opts.target) ? +opts.target : 41, signals: [], chat: [], chatSeq: 0, wins: Array(mode === 4 ? 2 : mode).fill(0), touched: Date.now(), awayTimer: null,
   };
   rooms.set(r.code, r);
   return r;
@@ -120,7 +122,7 @@ function roomView(r, token) {
   const g = r.game;
   return {
     type: 'room',
-    code: r.code, mode: r.mode, level: r.level, isPublic: r.isPublic, low: r.kind === 'meno', kind: r.kind, target: r.target,
+    code: r.code, mode: r.mode, level: r.level, isPublic: r.isPublic, low: r.low, kind: r.kind, target: r.target,
     host: r.host === token, you, wins: r.wins,
     seats: r.seats.map(s => s ? { name: s.name, bot: !!s.bot, connected: s.bot || !!(clients.get(s.token) && clients.get(s.token).ws) } : null),
     game: g ? engOf(r).viewFor(g, you) : null,
@@ -138,7 +140,7 @@ function startGame(r) {
   if (r.seats.some(s => !s)) return false;
   const prevDealer = r.game ? r.game.dealer : -1;
   const o = { names: r.seats.map(s => s.name), bots: r.seats.map(s => !!s.bot), dealer: prevDealer + 1 };
-  r.game = r.kind === 'treseta' ? T.newGame(r.mode, Object.assign(o, { target: r.target })) : E.newGame(r.mode, Object.assign(o, { low: r.kind === 'meno' }));
+  r.game = r.kind === 'treseta' ? T.newGame(r.mode, Object.assign(o, { target: r.target, low: r.low })) : E.newGame(r.mode, Object.assign(o, { low: r.low }));
   r.signals = [];
   broadcast(r); schedule(r);
   return true;
@@ -211,7 +213,7 @@ wss.on('connection', ws => {
         const mode = +m.mode;
         if (![2, 3, 4].includes(mode)) return err('Neispravan način igre.');
         leaveCurrent(token);
-        const nr = createRoom(mode, token, { level: m.level, isPublic: false, kind: kindOf(m), target: m.target });
+        const nr = createRoom(mode, token, { level: m.level, isPublic: false, kind: kindOf(m), low: lowOf(m), target: m.target });
         joinRoom(nr, token);
         broadcast(nr); break;
       }
@@ -224,9 +226,9 @@ wss.on('connection', ws => {
       case 'quick': {
         const mode = +m.mode;
         if (![2, 3, 4].includes(mode)) return err('Neispravan način igre.');
-        const kind = kindOf(m);
-        let nr = [...rooms.values()].find(x => x.isPublic && x.mode === mode && x.kind === kind && !x.game && x.seats.includes(null) && seatOf(x, token) < 0);
-        if (!nr) { leaveCurrent(token); nr = createRoom(mode, token, { isPublic: true, kind }); }
+        const kind = kindOf(m), low = lowOf(m);
+        let nr = [...rooms.values()].find(x => x.isPublic && x.mode === mode && x.kind === kind && x.low === low && !x.game && x.seats.includes(null) && seatOf(x, token) < 0);
+        if (!nr) { leaveCurrent(token); nr = createRoom(mode, token, { isPublic: true, kind, low }); }
         joinRoom(nr, token);
         if (!nr.seats.includes(null)) startGame(nr); else broadcast(nr);
         break;
@@ -243,7 +245,7 @@ wss.on('connection', ws => {
       }
       case 'addBot': if (r && r.host === token && !r.game) { addBot(r); broadcast(r); } break;
       case 'kick': if (r && r.host === token && !r.game) { const s = r.seats[+m.seat]; if (s && s.bot) { r.seats[+m.seat] = null; broadcast(r); } } break;
-      case 'variant': if (r && r.host === token && !r.isPublic && (!r.game || r.game.phase === 'over')) { r.kind = kindOf(m); r.game = null; r.wins = r.wins.map(() => 0); broadcast(r); } break;
+      case 'variant': if (r && r.host === token && !r.isPublic && (!r.game || r.game.phase === 'over')) { r.kind = kindOf(m); r.low = lowOf(m); r.game = null; r.wins = r.wins.map(() => 0); broadcast(r); } break;
       case 'target': if (r && r.host === token && T.TARGETS.includes(+m.target) && (!r.game || r.game.phase === 'over')) { r.target = +m.target; r.game = null; broadcast(r); } break;
       case 'next': if (r && r.host === token && r.game && r.game.phase === 'hand') nextHand(r); break;
       case 'level': if (r && r.host === token && ['easy', 'normal', 'hard'].includes(m.level)) { r.level = m.level; broadcast(r); } break;

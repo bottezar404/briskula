@@ -51,10 +51,10 @@ console.log('OK');
 
 // ---------------- trešeta ----------------
 const T = require('../public/treseta.js'); const TB = require('../public/treseta-bot.js');
-function runT(mode, levels, n) {
+function runT(mode, levels, n, low) {
   const sum = Array(mode === 4 ? 2 : mode).fill(0);
   for (let g = 0; g < n; g++) {
-    const st = T.newGame(mode, { bots: Array(mode).fill(true), target: 1 });
+    const st = T.newGame(mode, { bots: Array(mode).fill(true), target: 1, low });
     let guard = 0;
     while (st.phase === 'play' || st.phase === 'collect') {
       if (st.phase === 'collect') { T.collect(st); continue; }
@@ -67,17 +67,33 @@ function runT(mode, levels, n) {
     assert(st.players.every(p => p.hand.length === 0) && st.deck.length === 0);
     const hr = st.handResult;
     const cardPts = hr.teams.reduce((a, t) => a + t.points - t.akPts, 0);
+    if (low) { assert(st.akuze.length === 0); if (hr.teams.some(t => t.kapot)) { hr.teams.forEach(t => assert.strictEqual(t.points, t.kapot ? 0 : 11)); continue; } }
     if (mode === 3) assert(cardPts === 10 || cardPts === 11); else assert.strictEqual(cardPts, 11);
     assert.strictEqual(hr.teams.reduce((a, t) => a + t.cardBele, 0), 32 + (mode === 3 ? 0 : 0));
     hr.teams.forEach(t => sum[t.team] += t.points - t.akPts);
   }
-  console.log('treseta', mode, levels.join(','), sum.map(x => (x / n).toFixed(2)).join(' : '));
+  console.log(low ? 'treseta chi fa meno' : 'treseta', mode, levels.join(','), sum.map(x => (x / n).toFixed(2)).join(' : '));
   return sum.map(x => x / n);
 }
 let r2 = runT(2, ['easy', 'normal'], 300); assert(r2[1] > r2[0]);
 runT(3, ['easy', 'normal', 'normal'], 300);
 let r4 = runT(4, ['easy', 'normal', 'easy', 'normal'], 300); assert(r4[1] > r4[0]);
 r2 = runT(2, ['normal', 'hard'], 20); assert(r2[1] > r2[0]);
+r2 = runT(2, ['easy', 'normal'], 300, true); assert(r2[1] < r2[0]);
+r4 = runT(4, ['easy', 'normal', 'easy', 'normal'], 300, true); assert(r4[1] < r4[0]);
+runT(3, ['easy', 'normal', 'hard'], 10, true);
+r2 = runT(2, ['normal', 'hard'], 20, true); assert(r2[1] < r2[0]);
+// trešeta na manje: partija završava kad netko dođe do cilja, pobjeđuje tko ima manje
+{
+  const st = T.newGame(2, { target: 21, low: true });
+  while (st.phase !== 'over') {
+    if (st.phase === 'hand') { T.nextHand(st); continue; }
+    if (st.phase === 'collect') { T.collect(st); continue; }
+    T.play(st, st.turn, TB.choose(T.viewFor(st, st.turn), 'normal'));
+  }
+  const w = st.result.winners[0];
+  assert(Math.max(...st.score) >= 21 && st.score[w] < st.score[1 - w] && st.result.low);
+}
 // pravila trešete
 assert.strictEqual(T.trickWinnerIndex([{ p: 0, card: 'kupe-1' }, { p: 1, card: 'kupe-3' }, { p: 2, card: 'bate-3' }]), 1);
 assert.strictEqual(T.trickWinnerIndex([{ p: 0, card: 'kupe-13' }, { p: 1, card: 'spade-3' }]), 0);

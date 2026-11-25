@@ -5,6 +5,10 @@
  * Na kraju ruke bele se dijele s 3 i ostatak se odbacuje, pa ruka vrijedi 11 bodova
  * (u troje 10 ili 11). Akuže (napolitana, tri/četiri trice, dvice ili asa)
  * dodaju se cijelim bodovima. Igra se do zadanog broja bodova (zadano 41).
+ *
+ * "Chi fa meno" (opts.low): cilj je skupiti što MANJE bodova. Nema akuža.
+ * Tko u jednoj ruci pokupi sve bodove (kapot), dobije 0, a svi ostali po 11.
+ * Partija završava kad netko dođe do cilja; pobjeđuje tko tada ima najmanje.
  */
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) module.exports = factory();
@@ -102,7 +106,7 @@
 
   /**
    * mode: 2, 3 ili 4 (4 = parovi, suigrači nasuprot: 0+2 protiv 1+3)
-   * opts: { names:[], bots:[bool], dealer, rng, target (21/31/41), akuze (true) }
+   * opts: { names:[], bots:[bool], dealer, rng, target (21/31/41), akuze (true), low }
    */
   function newGame(mode, opts) {
     opts = opts || {};
@@ -114,7 +118,8 @@
     const st = {
       kind: 'treseta', mode, players,
       target: TARGETS.includes(+opts.target) ? +opts.target : 41,
-      akuzeOn: opts.akuze !== false,
+      low: !!opts.low,
+      akuzeOn: opts.akuze !== false && !opts.low,
       score: Array(teamCount(mode)).fill(0),
       hands: [], handNo: 0,
       dealer: opts.dealer != null ? ((opts.dealer % mode) + mode) % mode : Math.floor((opts.rng || Math.random)() * mode),
@@ -217,16 +222,23 @@
       const pts = Math.floor((cardBele + (last ? LAST_BELE : 0)) / 3) + akPts;
       teams.push({ team: t, players: ps, cardBele, last, akuze: ak.map(a => ({ p: a.p, text: a.text, pts: a.pts })), akPts, points: pts });
     }
+    if (st.low) {
+      // kapot: jedna strana pokupila sve bodove -> ona 0, ostali po 11
+      const all = teams.reduce((a, t) => a + t.cardBele + (t.last ? LAST_BELE : 0), 0);
+      const k = teams.find(t => t.cardBele + (t.last ? LAST_BELE : 0) === all);
+      if (k) teams.forEach(t => { t.kapot = t === k; t.points = t === k ? 0 : 11; });
+    }
     teams.forEach(t => { st.score[t.team] += t.points; t.total = st.score[t.team]; });
     st.handResult = { handNo: st.handNo, teams };
     st.hands.push({ handNo: st.handNo, points: teams.map(t => t.points), score: st.score.slice() });
     const max = Math.max(...st.score);
-    const top = st.score.map((s, t) => s === max ? t : -1).filter(t => t >= 0);
+    const best = st.low ? Math.min(...st.score) : max;
+    const top = st.score.map((s, t) => s === best ? t : -1).filter(t => t >= 0);
     if (max >= st.target && top.length === 1) {
       st.phase = 'over';
       st.result = {
         scores: st.score.map((s, t) => ({ team: t, players: teamPlayers(st.mode, t), points: s })),
-        winners: teamPlayers(st.mode, top[0]), draw: false, hands: st.hands.slice(), target: st.target,
+        winners: teamPlayers(st.mode, top[0]), draw: false, hands: st.hands.slice(), target: st.target, low: st.low,
       };
     } else st.phase = 'hand'; // nitko još nije došao do cilja (ili je izjednačeno): nova ruka
   }
@@ -243,7 +255,7 @@
   /** Ono što igrač p smije vidjeti. */
   function viewFor(st, p) {
     return {
-      kind: 'treseta', mode: st.mode, you: p, low: false,
+      kind: 'treseta', mode: st.mode, you: p, low: !!st.low,
       players: st.players.map((pl, i) => ({
         name: pl.name, bot: pl.bot, handCount: pl.hand.length, team: teamOf(st.mode, i),
         wonCount: pl.won.length / st.mode, points: pl.bele,

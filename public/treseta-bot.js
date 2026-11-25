@@ -109,7 +109,44 @@
     return dump(legal, out);
   }
 
-  function heuristic(v) { return v.trick.length ? follow(v) : lead(v); }
+  // ---------- "Chi fa meno": što manje bodova ----------
+  // vodi se niskom kartom u boji u kojoj su vani jače karte (netko drugi će nositi)
+  function leadLow(v) {
+    const out = outCards(v);
+    let best = null, bv = -Infinity;
+    for (const c of v.hand) {
+      const higher = out.filter(x => suit(x) === suit(c) && str(x) > str(c)).length;
+      const val = higher * 0.6 - str(c) * 0.5 - bele(c) * 1.5 + (higher ? 0 : -8);
+      if (val > bv) { bv = val; best = c; }
+    }
+    return best;
+  }
+  function followLow(v) {
+    const legal = T.legalCards(v.hand, v.trick);
+    if (legal.length === 1) return legal[0];
+    const s = suit(v.trick[0].card);
+    const bi = T.trickWinnerIndex(v.trick), bestCard = v.trick[bi].card;
+    const partnerWinning = isMate(v, v.trick[bi].p);
+    const last = after(v).length === 0;
+    const following = suit(legal[0]) === s;
+    const pick = key => legal.slice().sort((a, b) => key(b) - key(a))[0];
+    if (following) {
+      const losers = legal.filter(c => str(c) < str(bestCard));
+      if (losers.length) {
+        // gubim štih: protivniku istovari bodove i jake karte, suigraču ne
+        return partnerWinning ? pick(c => -bele(c) * 3 + str(c) * 0.1) : pick(c => bele(c) * 3 + str(c) * 0.2);
+      }
+      // moram preuzeti: zadnji baca najjaču (štih je ionako moj), inače najslabiju
+      return last ? pick(c => -bele(c) * 3 + str(c) * 0.2) : pick(c => -bele(c) * 3 - str(c) * 0.2);
+    }
+    // nemam boju: riješi se bodova i jakih karata (ako suigrač ne nosi)
+    return partnerWinning ? pick(c => -bele(c) * 3 + str(c) * 0.2) : pick(c => bele(c) * 3 + str(c) * 0.3);
+  }
+
+  function heuristic(v) {
+    if (v.low) return v.trick.length ? followLow(v) : leadLow(v);
+    return v.trick.length ? follow(v) : lead(v);
+  }
 
   // ---------- teški bot: mnogo zamišljenih rasporeda karata ----------
   function rnd(n) { return Math.floor(Math.random() * n); }
@@ -144,7 +181,7 @@
     const st = {
       kind: 'treseta', mode: v.mode,
       players: v.players.map((pl, q) => ({ name: '', bot: true, hand: d.hands[q], won: [], bele: pl.points })),
-      target: 999, akuzeOn: false, score: v.score.slice(), hands: [], handNo: v.handNo, dealer: 0,
+      target: 999, akuzeOn: false, low: !!v.low, score: v.score.slice(), hands: [], handNo: v.handNo, dealer: 0,
       deck: d.deck, leader: v.leader, turn: v.turn, trick: v.trick.slice(), lastTrick: null, lastDraw: null,
       trickNo: v.trickNo, voids: v.voids.map(x => x.slice()), known: v.known.map(x => x.slice()), akuze: [],
       handResult: null, result: null, phase: 'play',
@@ -160,7 +197,7 @@
     let mine = 0, opp = 0, no = 0;
     st.players.forEach((pl, q) => { if (T.teamOf(st.mode, q) === mt) mine += pl.bele; else { opp += pl.bele; no++; } });
     if (st.mode === 3) opp /= 2;
-    return mine - opp;
+    return st.low ? opp - mine : mine - opp;
   }
 
   function playout(st, first, me) {
@@ -210,7 +247,7 @@
         let pts = bele(trick[0].card) + bele(trick[1].card);
         if (!myH.length && !opH.length) pts += T.LAST_BELE;
         const r = (myH.length || opH.length) ? solve(myH, opH, [], wp).val : 0;
-        return { val: r + (wp === me ? pts : -pts) };
+        return { val: r + (wp === me ? pts : -pts) * (v.low ? -1 : 1) };
       }
       const key = trick.length ? null : myH.join() + '|' + opH.join() + '|' + turn;
       if (key && memo.has(key)) return memo.get(key);

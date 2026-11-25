@@ -120,7 +120,8 @@ function addBot(r) {
   if (i < 0) return false;
   const used = new Set(r.seats.filter(Boolean).map(s => s.name));
   const name = BOT_NAMES.find(n => !used.has(n)) || 'Bot';
-  r.seats[i] = { bot: true, name, av: AV.forName(name) };
+  // botovi dobiju nasumičnu dužinu pišulinca (1–50 cm), ista dok sjede u sobi
+  r.seats[i] = { bot: true, name, av: AV.forName(name), cm: 1 + Math.floor(Math.random() * 50) };
   return true;
 }
 

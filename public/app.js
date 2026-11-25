@@ -24,6 +24,7 @@
   const S = {
     name: store.get('name', ''),
     showPoints: store.get('showPoints', true),
+    showCm: store.get('showCm', true), // dužina pišulinca ispod avatara u igri
     sound: store.get('sound', true),
     botMode: store.get('botMode', 2), botLevel: store.get('botLevel', 'normal'),
     onMode: store.get('onMode', 2),
@@ -53,6 +54,7 @@
   const myAv = () => S.avatar === 'img' && S.avatarImg ? (imgCache.me = S.avatarImg, 'i:me') : S.avatar;
   const profileMsg = () => Object.assign({ type: 'profile', name: S.name, cm: S.cm }, S.avatar === 'img' && S.avatarImg ? { av: 'img', img: S.avatarImg } : { av: S.avatar });
   const cmText = cm => cm ? cm + ' cm' : 'tajna 🤫';
+  const botCm = () => 1 + Math.floor(Math.random() * CM_MAX);
   function avatar(seat, cls, extra) {
     if (!seat) return `<span class="av ${cls || ''} empty"></span>`;
     return `<span class="av ${cls || ''}">${AV.inner(seat.av, imgCache, seat.name)}${seat.cm ? `<span class="cmb" title="Dužina pišulinca">${seat.cm}<small>cm</small></span>` : ''}${extra || ''}</span>`;
@@ -91,6 +93,7 @@
       const botNames = ['Jure', 'Mare', 'Ante', 'Luce', 'Frane', 'Tonka'].sort(() => Math.random() - .5);
       this.names = [name || 'Ti'].concat(botNames.slice(0, mode - 1).map(n => 'Bot ' + n));
       this.avs = this.names.map((n, i) => i ? AV.forName(n) : null);
+      this.cms = this.names.map((n, i) => i ? botCm() : 0); // botovi: nasumično, isto cijelu partiju
       this.wins = Array(mode === 4 ? 2 : mode).fill(0);
       this.signals = []; this.dealer = Math.floor(Math.random() * mode) - 1;
       this.start();
@@ -104,7 +107,7 @@
     view() {
       return {
         type: 'room', local: true, code: null, mode: this.mode, level: this.level, low: this.low, kind: this.kind, target: this.target, host: true, you: 0, wins: this.wins,
-        seats: this.names.map((n, i) => ({ name: n, bot: i > 0, connected: true, av: i ? this.avs[i] : myAv(), cm: i ? 0 : S.cm })),
+        seats: this.names.map((n, i) => ({ name: n, bot: i > 0, connected: true, av: i ? this.avs[i] : myAv(), cm: i ? this.cms[i] : S.cm })),
         game: this.E.viewFor(this.st, 0), signals: this.signals.slice(-6),
       };
     }
@@ -523,10 +526,15 @@
       const pl = g.players[p];
       const seat = r.seats[p];
       const off = seat && !seat.bot && !seat.connected;
-      const pts = S.showPoints ? `<span class="pts">${ptsText(g, pl.points)}</span>` : `<span class="muted">${pl.wonCount}</span>`;
       const turn = g.phase === 'play' && g.turn === p;
+      // u parovima bodovi nisu po igraču nego zajedno za par (vidi pairBox)
+      const pts = g.mode === 4 ? '' : S.showPoints ? `<span class="pts">${ptsText(g, pl.points)}</span>` : `<span class="muted">${pl.wonCount}</span>`;
+      const who = seat || { name: pl.name };
+      const av = S.showCm
+        ? `<span class="avw">${avatar(Object.assign({}, who, { cm: 0 }), turn ? 'turn' : '', bubble(p) + turnRing(r, g, p))}<span class="cml ${who.cm ? '' : 'secret'}" title="Dužina pišulinca">${who.cm ? who.cm + ' cm' : 'tajna'}</span></span>`
+        : avatar(who, turn ? 'turn' : '', bubble(p) + turnRing(r, g, p));
       // avatar s oblačićem poruke iznad njega, pa pločica s imenom i bodovima
-      return `<div class="pl pl-${p === me ? 'me' : posOf(p, g)}">${avatar(seat || { name: pl.name }, turn ? 'turn' : '', bubble(p) + turnRing(r, g, p))}<div class="nameplate ${turn ? 'turn' : ''}">
+      return `<div class="pl pl-${p === me ? 'me' : posOf(p, g)}">${av}<div class="nameplate ${turn ? 'turn' : ''}">
         ${g.mode === 4 ? `<span class="dot t${p % 2}"></span>` : ''}${esc(pl.name)}${off ? ' <span class="off">⚠</span>' : ''} ${pts}</div></div>`;
     };
     const bubble = p => bubbles[p] ? `<div class="bubble ${bubbles[p].team != null ? 'team' : ''} ${bubbles[p].chat ? 'chatb' : ''} ${bubbles[p].akuza ? 'akuza' : ''}">${esc(bubbles[p].text)}</div>` : '';
@@ -555,16 +563,23 @@
       seats += `<div class="seat ${pos}">${pos === 'top' ? cards + plate(p) : plate(p) + cards}</div>`;
     }
 
+    // parovi: zbrojeni bodovi para (ili broj štihova ako su bodovi skriveni)
+    const myT = E.teamOf(g.mode, me);
+    const teamSum = (t, k) => g.players[t][k] + g.players[t + 2][k];
+    const pairVal = t => S.showPoints ? ptsText(g, teamSum(t, 'points')) : teamSum(t, 'wonCount');
+    const pairRows = g.mode === 4 ? [[myT, 'Mi'], [1 - myT, 'Vi']].map(([t, n]) => `<div class="ts"><span><i class="dot t${t}"></i> ${n}</span><b>${pairVal(t)}</b></div>`).join('') : '';
+    const pairHead = S.showPoints ? 'Bodovi parova' : 'Štihovi parova';
+
     // špil + briškula (u trešeti nema briškule; u dvoje se vuče iz špila)
     let deck;
     if (tre) {
-      const myT = E.teamOf(g.mode, me);
       const names = g.mode === 4 ? ['Mi', 'Vi'] : g.players.map((pl, i) => i === me ? 'Ti' : pl.name.replace(/^Bot /, ''));
       const order = g.mode === 4 ? [myT, 1 - myT] : g.players.map((_, i) => (me + i) % g.mode);
       deck = `<div class="tinfo">
         ${g.deckCount > 0 ? `<div class="tdeck"><div class="card sm">${Art.back()}</div><div class="count">${g.deckCount}</div></div>` : ''}
         <div class="tscore"><div class="muted">Ruka ${g.handNo} · do ${g.target}</div>
-          ${order.map(t => `<div class="ts"><span>${esc(g.mode === 4 ? names[t === myT ? 0 : 1] : names[t])}</span><b>${g.score[t]}</b></div>`).join('')}
+          ${order.map(t => `<div class="ts"><span>${g.mode === 4 ? `<i class="dot t${t}"></i> ` : ''}${esc(g.mode === 4 ? names[t === myT ? 0 : 1] : names[t])}</span><b>${g.score[t]}</b></div>`).join('')}
+          ${g.mode === 4 ? `<div class="muted tsh">Ova ruka: ${S.showPoints ? '' : 'štihovi'}</div>${pairRows}` : ''}
         </div></div>`;
     } else if (g.deckCount > 0) {
       deck = `<div class="deck">
@@ -574,6 +589,7 @@
     } else {
       deck = `<div class="trumpinfo">${Art.suit(g.trumpSuit, .85)}<span>briškula</span></div>`;
     }
+    if (!tre && g.mode === 4) deck += `<div class="tscore pscore"><div class="muted">${pairHead}</div>${pairRows}</div>`;
 
     // štih
     const showTrick = g.trick.length ? g.trick : [];
@@ -675,6 +691,7 @@
     if (modal === 'rules') html = rulesHtml();
     else if (modal === 'settings') html = `<h2>Postavke</h2>
       <label class="chk"><input type="checkbox" id="sp" ${S.showPoints ? 'checked' : ''}> Prikaži bodove tijekom igre</label>
+      <label class="chk"><input type="checkbox" id="scm" ${S.showCm ? 'checked' : ''}> Prikaži dužinu pišulinca ispod avatara</label>
       <label class="chk"><input type="checkbox" id="snd" ${S.sound ? 'checked' : ''}> Zvukovi</label>
       <div class="row" style="margin-top:12px"><button class="ghost" id="rulesB">Pravila</button><button id="close">Zatvori</button></div>`;
     else if (modal === 'avatar') {
@@ -697,6 +714,7 @@
     el.innerHTML = `<div class="modal">${html}</div>`;
     const c = el.querySelector('#close'); if (c) c.onclick = () => { modal = null; render(); };
     const sp = el.querySelector('#sp'); if (sp) sp.onchange = () => { S.showPoints = sp.checked; save(); render(); };
+    const scm = el.querySelector('#scm'); if (scm) scm.onchange = () => { S.showCm = scm.checked; save(); render(); };
     const snd = el.querySelector('#snd'); if (snd) snd.onchange = () => { S.sound = snd.checked; save(); };
     const rb = el.querySelector('#rulesB'); if (rb) rb.onclick = () => { modal = 'rules'; render(); };
     el.querySelectorAll('[data-av]').forEach(b => b.onclick = () => { S.avatar = b.dataset.av; save(); render(); });

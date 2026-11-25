@@ -267,3 +267,47 @@ label.chk input { width: 20px; height: 20px; }
   body.chat-open #app { padding-right: 360px; }
   body.chat-open #toast { left: calc(50% - 180px); }
 }
+
+/* ---------- trešeta ---------- */
+/* puno karata u ruci (10–13): karte se preklapaju taman toliko da stanu u širinu */
+.me.tre { --cw: min(24vw, 13.5vh, 130px); }
+.hand.many { gap: 0; width: 100%; max-width: calc(var(--n) * (var(--cw) + 8px)); }
+.hand.many .card { flex: 0 0 auto; }
+.hand.many .card + .card { margin-left: min(8px, calc((100% - var(--n) * var(--cw)) / (var(--n) - 1))); }
+.hand .card.dim { filter: brightness(.5) saturate(.6); }
+.tcards { display: flex; align-items: center; gap: 6px; }
+.tcards .known { display: flex; }
+.tcards .known .card + .card { margin-left: calc(var(--sw) * -0.45); }
+.tcards.side .known .card + .card { margin-left: calc(var(--sw) * -0.6); }
+.tcards.side .known + .backs { display: none; }
+.tcards .hc { font-weight: 800; font-size: 15px; text-shadow: 0 1px 3px #000; min-width: 16px; }
+.tinfo { position: absolute; left: 8px; bottom: 34px; display: flex; align-items: flex-end; gap: 8px; z-index: 3; }
+.tdeck { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.tdeck .count { font-weight: 800; font-size: 16px; text-shadow: 0 1px 3px #000, 0 0 2px #000; }
+.tscore { background: rgba(0,0,0,.4); border: 1px solid rgba(255,255,255,.1); border-radius: 10px; padding: 5px 9px; font-size: 13px; min-width: 92px; }
+.tscore .muted { font-size: 11px; margin-bottom: 2px; white-space: nowrap; }
+.tscore .ts { display: flex; justify-content: space-between; gap: 10px; font-weight: 600; }
+.tscore .ts span { max-width: 80px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tscore .ts b { color: #ffd76a; }
+.bubble.akuza { background: #fff1bf; white-space: normal; width: max-content; max-width: min(62vw, 280px); text-align: center; }
+.seat.right .bubble.akuza { right: 0; }
+.seat.left .bubble.akuza { left: 0; }
+.hand-table td { text-align: center; padding: 6px 3px; font-size: 15px; }
+.hand-table td:first-child { text-align: left; }
+.hand-table td.tot { font-size: 18px; color: var(--gold); }
+.hand-table .ak { font-size: 12px; }
+.scores tr.th td { font-size: 12px; font-weight: 600; opacity: .7; }
+.scores.small td, .scores.small td:last-child { font-size: 14px; font-weight: 600; text-align: center; }
+.scores.small td:first-child { text-align: left; }
+details.hist { margin-bottom: 10px; }
+details.hist summary { cursor: pointer; text-align: center; margin-bottom: 6px; }
+@media (min-width: 900px) and (min-height: 520px) {
+  .me.tre { --cw: min(9vw, calc((100vh - 100px) / 5.4), 150px); }
+  .me.tre .hand.many { flex: 1 1 auto; min-width: 0; }
+  .tinfo { left: 20px; bottom: 20px; }
+  .tscore { font-size: 15px; min-width: 120px; padding: 8px 12px; }
+  .tscore .muted { font-size: 13px; }
+  .signals.tre { grid-template-rows: repeat(4, auto); }
+}
+.bubble.akuza { animation: none; }
+.tcards .backs { padding: 0 calc(var(--sw) * .32); }

@@ -2,11 +2,17 @@
 (function () {
   'use strict';
   const E = window.BriskulaEngine, B = window.BriskulaBot, Art = window.CardArt;
+  const T = window.TresetaEngine, TB = window.TresetaBot;
+  const engOf = k => k === 'treseta' ? T : E;
+  const botOf = k => k === 'treseta' ? TB : B;
   const $app = document.getElementById('app');
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const MODE_NAMES = { 2: 'Dvoje', 3: 'Troje', 4: 'Parovi (2 na 2)' };
   const LEVEL_NAMES = { easy: 'Lako', normal: 'Srednje', hard: 'Teško' };
   const LOW_NAME = 'Chi fa meno';
+  const KIND_NAMES = { briskula: 'Briškula', meno: LOW_NAME, treseta: 'Trešeta' };
+  const KINDS = [['briskula', 'Briškula'], ['meno', LOW_NAME], ['treseta', 'Trešeta']];
+  const kindLabel = k => k && k !== 'briskula' ? ' · ' + KIND_NAMES[k] : '';
 
   // ---------- postavke ----------
   const store = {
@@ -19,8 +25,12 @@
     sound: store.get('sound', true),
     botMode: store.get('botMode', 2), botLevel: store.get('botLevel', 'normal'),
     onMode: store.get('onMode', 2),
-    low: store.get('low', false), // "Chi fa meno": pobjeđuje tko ima manje bodova
+    // vrsta igre: briškula, "Chi fa meno" (pobjeđuje tko ima manje bodova) ili trešeta
+    kind: store.get('kind', store.get('low', false) ? 'meno' : 'briskula'),
+    target: store.get('target', 41), // trešeta: do koliko bodova
   };
+  if (!KIND_NAMES[S.kind]) S.kind = 'briskula';
+  if (![21, 31, 41].includes(S.target)) S.target = 41;
   function save() { for (const k in S) store.set(k, S[k]); }
 
   let room = null;       // trenutni prikaz sobe (lokalne ili online)
@@ -50,8 +60,9 @@
 
   // ---------- lokalna igra protiv botova ----------
   class LocalGame {
-    constructor(mode, level, name, low) {
-      this.mode = mode; this.level = level; this.local = true; this.low = !!low;
+    constructor(mode, level, name, kind, target) {
+      this.mode = mode; this.level = level; this.local = true; this.kind = kind || 'briskula'; this.low = this.kind === 'meno'; this.target = target || 41;
+      this.E = engOf(this.kind); this.B = botOf(this.kind);
       const botNames = ['Jure', 'Mare', 'Ante', 'Luce', 'Frane', 'Tonka'].sort(() => Math.random() - .5);
       this.names = [name || 'Ti'].concat(botNames.slice(0, mode - 1).map(n => 'Bot ' + n));
       this.wins = Array(mode === 4 ? 2 : mode).fill(0);
@@ -60,15 +71,15 @@
     }
     start() {
       this.dealer = (this.dealer + 1) % this.mode;
-      this.st = E.newGame(this.mode, { names: this.names, bots: this.names.map((_, i) => i > 0), dealer: this.dealer, low: this.low });
+      this.st = this.E.newGame(this.mode, { names: this.names, bots: this.names.map((_, i) => i > 0), dealer: this.dealer, low: this.low, target: this.target });
       this.signals = [];
       this.emit(); this.schedule();
     }
     view() {
       return {
-        type: 'room', local: true, code: null, mode: this.mode, level: this.level, low: this.low, host: true, you: 0, wins: this.wins,
+        type: 'room', local: true, code: null, mode: this.mode, level: this.level, low: this.low, kind: this.kind, target: this.target, host: true, you: 0, wins: this.wins,
         seats: this.names.map((n, i) => ({ name: n, bot: i > 0, connected: true })),
-        game: E.viewFor(this.st, 0), signals: this.signals.slice(-6),
+        game: this.E.viewFor(this.st, 0), signals: this.signals.slice(-6),
       };
     }
     emit() { onRoom(this.view()); }
@@ -76,16 +87,17 @@
       clearTimeout(this.timer);
       const st = this.st;
       if (st.phase === 'collect') this.timer = setTimeout(() => {
-        E.collect(st);
+        this.E.collect(st);
         if (st.phase === 'over' && !st.result.draw) this.wins[E.teamOf(this.mode, st.result.winners[0])]++;
         this.emit(); this.schedule();
       }, 1350);
       else if (st.phase === 'play' && st.turn !== 0) this.timer = setTimeout(() => {
-        const c = B.choose(E.viewFor(st, st.turn), this.level);
-        E.play(st, st.turn, c); this.emit(); this.schedule();
+        const c = this.B.choose(this.E.viewFor(st, st.turn), this.level);
+        this.E.play(st, st.turn, c); this.emit(); this.schedule();
       }, 650 + Math.random() * 450);
     }
-    play(c) { if (E.play(this.st, 0, c)) { this.emit(); this.schedule(); } }
+    play(c) { if (this.E.play(this.st, 0, c)) { this.emit(); this.schedule(); } }
+    next() { if (this.st.phase === 'hand') { T.nextHand(this.st); this.signals = []; this.emit(); this.schedule(); } }
     signal(text, team) {
       this.signals.push({ id: Math.random(), from: 0, text, team: team ? 0 : null });
       this.emit();
@@ -126,6 +138,7 @@
     signal(text, team) { this.send({ type: 'signal', text, team }); }
     chat(text) { this.send({ type: 'chat', text }); }
     rematch() { this.send({ type: 'start' }); }
+    next() { this.send({ type: 'next' }); }
     leave() { this.send({ type: 'leave' }); }
   }
   let net = null;
@@ -241,6 +254,11 @@
     return `<div class="seg" data-seg="${name}">${opts.map(([v, t]) => `<button data-v="${v}" class="${String(v) === String(val) ? 'on' : ''}">${t}</button>`).join('')}</div>`;
   }
 
+  const KIND_DESC = {
+    briskula: 'Klasična briškula: pobjeđuje tko skupi više bodova.',
+    meno: LOW_NAME + ': pobjeđuje tko skupi <b>manje</b> bodova.',
+    treseta: 'Trešeta: bez briškule, mora se odgovoriti na boju. Igra se u više ruku, do zadanog broja bodova.',
+  };
   function renderMenu() {
     const fan = ['kupe-1', 'spade-13', 'dinari-3', 'bate-12'].map((c, i) => `<div style="transform: rotate(${(i - 1.5) * 12}deg) translateY(${Math.abs(i - 1.5) * 6}px)">${Art.face(c)}</div>`).join('');
     const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) && !window.navigator.standalone;
@@ -249,8 +267,9 @@
       <div class="panel"><h2 class="desk-only">Tvoje ime</h2><input id="name" maxlength="20" placeholder="Tvoje ime" value="${esc(S.name)}"></div>
       <div class="panel">
         <h2>Vrsta igre</h2>
-        ${seg('low', [[0, 'Briškula'], [1, LOW_NAME]], S.low ? 1 : 0)}
-        <p class="muted" style="margin:0">${S.low ? LOW_NAME + ': pobjeđuje tko skupi <b>manje</b> bodova.' : 'Klasična briškula: pobjeđuje tko skupi više bodova.'}</p>
+        ${seg('kind', KINDS, S.kind)}
+        ${S.kind === 'treseta' ? seg('target', [[21, 'Do 21'], [31, 'Do 31'], [41, 'Do 41']], S.target) : ''}
+        <p class="muted" style="margin:0">${KIND_DESC[S.kind]}</p>
       </div>
       <div class="panel">
         <h2>Igraj protiv botova</h2>
@@ -278,10 +297,10 @@
     nameEl.oninput = () => { S.name = nameEl.value.trim(); save(); };
     bindSegs();
     const needName = () => { if (!S.name) { S.name = 'Igrač' + Math.floor(Math.random() * 900 + 100); save(); } };
-    $app.querySelector('#playBots').onclick = () => { needName(); ctrl = new LocalGame(+S.botMode, S.botLevel, S.name, S.low); };
+    $app.querySelector('#playBots').onclick = () => { needName(); ctrl = new LocalGame(+S.botMode, S.botLevel, S.name, S.kind, S.target); };
     if (!window.BRK_OFFLINE) {
-    $app.querySelector('#create').onclick = () => { needName(); ctrl = getNet(); ctrl.send({ type: 'setName', name: S.name }); ctrl.send({ type: 'create', mode: +S.onMode, level: 'normal', low: S.low }); };
-    $app.querySelector('#quick').onclick = () => { needName(); ctrl = getNet(); ctrl.send({ type: 'setName', name: S.name }); ctrl.send({ type: 'quick', mode: +S.onMode, low: S.low }); };
+    $app.querySelector('#create').onclick = () => { needName(); ctrl = getNet(); ctrl.send({ type: 'setName', name: S.name }); ctrl.send({ type: 'create', mode: +S.onMode, level: 'normal', kind: S.kind, low: S.kind === 'meno', target: S.target }); };
+    $app.querySelector('#quick').onclick = () => { needName(); ctrl = getNet(); ctrl.send({ type: 'setName', name: S.name }); ctrl.send({ type: 'quick', mode: +S.onMode, kind: S.kind, low: S.kind === 'meno' }); };
     const join = () => {
       const c = $app.querySelector('#code').value.trim().toUpperCase();
       if (c.length < 4) return toast('Upiši kod sobe');
@@ -300,7 +319,7 @@
     $app.querySelectorAll('[data-seg]').forEach(el => {
       el.querySelectorAll('button').forEach(b => b.onclick = () => {
         const k = el.dataset.seg; const v = b.dataset.v;
-        S[k] = k === 'low' ? v === '1' : /^\d+$/.test(v) ? +v : v; save(); render();
+        S[k] = /^\d+$/.test(v) ? +v : v; save(); render();
       });
     });
   }
@@ -312,7 +331,7 @@
     const full = r.seats.every(Boolean);
     const conn = net && net.ok;
     $app.innerHTML = `<div class="menu">
-      <div class="topbar"><button class="ghost small" id="leave">← Izlaz</button><div class="mid">${MODE_NAMES[r.mode]}${r.low ? ' · ' + LOW_NAME : ''}${r.isPublic ? ' · javna igra' : ''}</div>${chatBtn()}</div>
+      <div class="topbar"><button class="ghost small" id="leave">← Izlaz</button><div class="mid">${MODE_NAMES[r.mode]}${kindLabel(r.kind)}${r.isPublic ? ' · javna igra' : ''}</div>${chatBtn()}</div>
       <div class="panel" style="text-align:center">
         <div class="muted">Kod sobe</div>
         <div class="code">${esc(r.code)}</div>
@@ -332,7 +351,10 @@
         ${r.mode === 4 ? '<p class="muted">Par A (1. i 3. mjesto) igra protiv para B (2. i 4.). Klikni „Sjedni ovdje” da promijeniš mjesto.</p>' : ''}
         ${r.host && !r.isPublic ? `
           <div class="muted" style="margin-bottom:6px">Vrsta igre</div>
-          ${seg('roomLow', [[0, 'Briškula'], [1, LOW_NAME]], r.low ? 1 : 0)}` : r.low ? `<p class="muted">Igra se <b>${LOW_NAME}</b>: pobjeđuje tko skupi manje bodova.</p>` : ''}
+          ${seg('roomKind', KINDS, r.kind || 'briskula')}
+          ${r.kind === 'treseta' ? seg('roomTarget', [[21, 'Do 21'], [31, 'Do 31'], [41, 'Do 41']], r.target) : ''}`
+        : r.kind === 'meno' ? `<p class="muted">Igra se <b>${LOW_NAME}</b>: pobjeđuje tko skupi manje bodova.</p>`
+        : r.kind === 'treseta' ? `<p class="muted">Igra se <b>trešeta</b> do ${r.target} bodova.</p>` : ''}
         ${r.host ? `
           <div class="muted" style="margin-bottom:6px">Jačina botova</div>
           ${seg('roomLevel', [['easy', 'Lako'], ['normal', 'Srednje'], ['hard', 'Teško']], r.level)}
@@ -346,7 +368,7 @@
     const sh = $app.querySelector('#share');
     if (sh) sh.onclick = async () => {
       const url = link();
-      if (navigator.share) { try { await navigator.share({ title: 'Briškula', text: 'Dođi na partiju briškule! Kod: ' + r.code, url }); return; } catch { } }
+      if (navigator.share) { try { await navigator.share({ title: 'Briškula', text: 'Dođi na partiju ' + (r.kind === 'treseta' ? 'trešete' : 'briškule') + '! Kod: ' + r.code, url }); return; } catch { } }
       try { await navigator.clipboard.writeText(url); toast('Link kopiran'); } catch { toast(url); }
     };
     $app.querySelectorAll('[data-seat]').forEach(b => b.onclick = () => ctrl.send({ type: 'seat', seat: +b.dataset.seat }));
@@ -354,7 +376,8 @@
       $app.querySelector('#addBot').onclick = () => ctrl.send({ type: 'addBot' });
       $app.querySelector('#start').onclick = () => ctrl.send({ type: 'start', fillBots: true });
       $app.querySelectorAll('[data-kick]').forEach(b => b.onclick = () => ctrl.send({ type: 'kick', seat: +b.dataset.kick }));
-      $app.querySelectorAll('[data-seg="roomLow"] button').forEach(b => b.onclick = () => ctrl.send({ type: 'variant', low: b.dataset.v === '1' }));
+      $app.querySelectorAll('[data-seg="roomKind"] button').forEach(b => b.onclick = () => ctrl.send({ type: 'variant', kind: b.dataset.v, low: b.dataset.v === 'meno' }));
+      $app.querySelectorAll('[data-seg="roomTarget"] button').forEach(b => b.onclick = () => ctrl.send({ type: 'target', target: +b.dataset.v }));
       $app.querySelectorAll('[data-seg="roomLevel"] button').forEach(b => b.onclick = () => ctrl.send({ type: 'level', level: b.dataset.v }));
     }
   }
@@ -374,15 +397,20 @@
     return ['bottom', 'right', 'top', 'left'][rel];
   }
 
-  function suitOrder(T) { return s => (s === T ? 10 : 0) + E.SUITS.indexOf(s); }
-  function sortHand(h, T) {
-    const so = suitOrder(T);
-    return h.slice().sort((a, b) => so(E.suitOf(a)) - so(E.suitOf(b)) || E.strength(a) - E.strength(b));
+  function suitOrder(TS) { return s => (s === TS ? 10 : 0) + E.SUITS.indexOf(s); }
+  function sortHand(h, TS, G) {
+    const so = suitOrder(TS);
+    G = G || E;
+    return h.slice().sort((a, b) => so(E.suitOf(a)) - so(E.suitOf(b)) || G.strength(a) - G.strength(b));
   }
+  // bodovi za prikaz: u trešeti bele (trećine), npr. 3⅔
+  const ptsText = (g, b) => g.kind === 'treseta' ? T.fmt(b) : String(b);
 
   let flyTimer = null, enterKeys = new Set();
   function renderGame() {
     const r = room, g = r.game, me = g.you;
+    const tre = g.kind === 'treseta';
+    const G = engOf(g.kind);
     const myTurn = g.phase === 'play' && g.turn === me;
     const now = Date.now();
     const bubbles = {};
@@ -394,32 +422,61 @@
       const t = seenSignals.get(chatKey(r, m)) || 0;
       if (m.from !== me && now - t < 4000 && !(bubbles[m.from] && (seenSignals.get(bubbles[m.from].id) || 0) > t)) bubbles[m.from] = { text: m.text.length > 40 ? m.text.slice(0, 40) + '…' : m.text, team: null, chat: true };
     }
+    // trešeta: akuže se vide tijekom prvog štiha
+    if (tre && g.trickNo <= 1 && g.phase === 'play' && g.akuze && g.akuze.length) {
+      for (let p = 0; p < g.mode; p++) {
+        const a = g.akuze.filter(x => x.p === p);
+        if (a.length && !bubbles[p]) bubbles[p] = { text: 'Akuža: ' + a.map(x => x.text + ' (' + x.pts + ')').join(', '), team: null, akuza: true };
+      }
+    }
     const sysMsg = (r.signals || []).filter(s => s.from < 0 && now - (seenSignals.get(s.id) || 0) < 5000).pop();
 
     const plate = (p) => {
       const pl = g.players[p];
       const seat = r.seats[p];
       const off = seat && !seat.bot && !seat.connected;
-      const pts = S.showPoints ? `<span class="pts">${pl.points}</span>` : `<span class="muted">${pl.wonCount}</span>`;
+      const pts = S.showPoints ? `<span class="pts">${ptsText(g, pl.points)}</span>` : `<span class="muted">${pl.wonCount}</span>`;
       return `<div class="nameplate ${g.phase === 'play' && g.turn === p ? 'turn' : ''}">
         ${g.mode === 4 ? `<span class="dot t${p % 2}"></span>` : ''}${esc(pl.name)}${off ? ' <span class="off">⚠</span>' : ''} ${pts}</div>`;
     };
-    const bubble = p => bubbles[p] ? `<div class="bubble ${bubbles[p].team != null ? 'team' : ''} ${bubbles[p].chat ? 'chatb' : ''}">${esc(bubbles[p].text)}</div>` : '';
+    const bubble = p => bubbles[p] ? `<div class="bubble ${bubbles[p].team != null ? 'team' : ''} ${bubbles[p].chat ? 'chatb' : ''} ${bubbles[p].akuza ? 'akuza' : ''}">${esc(bubbles[p].text)}</div>` : '';
 
     let seats = '';
     for (let p = 0; p < g.mode; p++) {
       if (p === me) continue;
       const pos = posOf(p, g);
       const isPartner = g.mode === 4 && (p - me + 4) % 4 === 2;
+      const n = g.players[p].handCount;
       let cards;
       if (isPartner && g.partnerHand) cards = `<div class="partner-hand">${sortHand(g.partnerHand, g.trumpSuit).map(c => `<div class="card sm">${Art.face(c)}</div>`).join('')}</div>`;
-      else cards = `<div class="backs">${Array.from({ length: g.players[p].handCount }, () => `<div class="card sm">${Art.back()}</div>`).join('')}</div>`;
+      else if (tre) {
+        // karte koje su svi vidjeli (akuža, izvučene iz špila) okrenute su licem
+        const known = sortHand((g.known && g.known[p]) || [], null, T);
+        const hidden = n - known.length;
+        const side = pos !== 'top';
+        const shown = side ? Math.min(hidden, 3) : hidden;
+        cards = `<div class="tcards ${side ? 'side' : ''}">
+          ${known.length ? `<div class="known">${known.map(c => `<div class="card sm">${Art.face(c)}</div>`).join('')}</div>` : ''}
+          ${hidden ? `<div class="backs">${Array.from({ length: shown }, () => `<div class="card sm">${Art.back()}</div>`).join('')}</div>` : ''}
+          ${side && n ? `<div class="hc">${n}</div>` : ''}
+        </div>`;
+      }
+      else cards = `<div class="backs">${Array.from({ length: n }, () => `<div class="card sm">${Art.back()}</div>`).join('')}</div>`;
       seats += `<div class="seat ${pos}">${pos === 'top' ? cards + plate(p) : plate(p) + cards}${bubble(p)}</div>`;
     }
 
-    // špil + briškula
+    // špil + briškula (u trešeti nema briškule; u dvoje se vuče iz špila)
     let deck;
-    if (g.deckCount > 0) {
+    if (tre) {
+      const myT = E.teamOf(g.mode, me);
+      const names = g.mode === 4 ? ['Mi', 'Vi'] : g.players.map((pl, i) => i === me ? 'Ti' : pl.name.replace(/^Bot /, ''));
+      const order = g.mode === 4 ? [myT, 1 - myT] : g.players.map((_, i) => (me + i) % g.mode);
+      deck = `<div class="tinfo">
+        ${g.deckCount > 0 ? `<div class="tdeck"><div class="card sm">${Art.back()}</div><div class="count">${g.deckCount}</div></div>` : ''}
+        <div class="tscore"><div class="muted">Ruka ${g.handNo} · do ${g.target}</div>
+          ${order.map(t => `<div class="ts"><span>${esc(g.mode === 4 ? names[t === myT ? 0 : 1] : names[t])}</span><b>${g.score[t]}</b></div>`).join('')}
+        </div></div>`;
+    } else if (g.deckCount > 0) {
       deck = `<div class="deck">
         <div class="card sm trump">${Art.face(g.trump)}</div>
         ${g.deckCount > 1 ? `<div class="card sm pile">${Art.back()}</div>` : ''}
@@ -431,10 +488,10 @@
     // štih
     const showTrick = g.trick.length ? g.trick : [];
     let winIdx = -1;
-    if (g.phase === 'collect') winIdx = E.trickWinnerIndex(g.trick, g.trumpSuit);
+    if (g.phase === 'collect') winIdx = G.trickWinnerIndex(g.trick, g.trumpSuit);
     const newKeys = new Set();
     const trickHtml = showTrick.map((t, i) => {
-      const key = g.trickNo + ':' + t.p;
+      const key = g.handNo + ':' + g.trickNo + ':' + t.p;
       newKeys.add(key);
       const enter = !enterKeys.has(key) ? 'enter' : '';
       return `<div class="card pos-${posOf(t.p, g)} ${enter} ${i === winIdx ? 'win' : ''}">${Art.face(t.card)}</div>`;
@@ -446,16 +503,27 @@
     if (g.phase === 'play') status = myTurn ? 'Na potezu si' : 'Igra ' + esc(g.players[g.turn].name) + '…';
     else if (g.phase === 'collect') {
       const w = g.trick[winIdx].p;
-      const pts = g.trick.reduce((s, t) => s + E.points(t.card), 0);
-      status = (w === me ? 'Tvoj štih' : (g.mode === 4 && w % 2 === me % 2 ? 'Štih za vaš par' : 'Štih nosi ' + esc(g.players[w].name))) + (pts ? ` (+${pts})` : '');
+      let pts = g.trick.reduce((s, t) => s + G.points(t.card), 0);
+      const lastOne = tre && g.deckCount === 0 && g.players.every(pl => pl.handCount === 0);
+      if (lastOne) pts += T.LAST_BELE;
+      status = (w === me ? 'Tvoj štih' : (g.mode === 4 && w % 2 === me % 2 ? 'Štih za vaš par' : 'Štih nosi ' + esc(g.players[w].name))) + (pts ? ` (+${ptsText(g, pts)})` : '') + (lastOne ? ' · zadnji štih' : '');
     }
+    else if (g.phase === 'hand') status = 'Kraj ruke';
     if (sysMsg) status = esc(sysMsg.text);
 
-    const hand = sortHand(g.hand, g.trumpSuit);
-    const handHtml = hand.map(c => `<div class="card ${myTurn ? 'playable' : ''} ${E.suitOf(c) === g.trumpSuit ? 'trumpcard' : ''}" data-card="${c}">${Art.face(c)}</div>`).join('');
+    const hand = sortHand(g.hand, g.trumpSuit, G);
+    const legal = myTurn ? (tre ? T.legalCards(g.hand, g.trick) : g.hand) : [];
+    const handHtml = hand.map(c => {
+      const ok = legal.includes(c);
+      return `<div class="card ${ok ? 'playable' : ''} ${myTurn && !ok ? 'dim' : ''} ${!tre && E.suitOf(c) === g.trumpSuit ? 'trumpcard' : ''}" data-card="${c}">${Art.face(c)}</div>`;
+    }).join('');
+    const many = tre ? hand.length > 1 : hand.length > 5;
 
-    const sigs = g.phase === 'over' ? '' : `<div class="signals">
-      ${g.mode === 4 ? ['Imam briškulu', 'Nemam briškulu', 'Imam asa', 'Imam tricu'].concat(g.low ? ['Nosim ja', 'Ne mogu pustiti'] : ['Karikaj!', 'Ne karikaj']).map(t => `<button class="team" data-sig="${t}" data-team="1">${t}</button>`).join('') : ''}
+    let sigList = [];
+    if (tre) { if (g.mode === 4) sigList = [['Kucam', 0], ['Strišo', 0], ['Volo', 0]]; }
+    else if (g.mode === 4) sigList = ['Imam briškulu', 'Nemam briškulu', 'Imam asa', 'Imam tricu'].concat(g.low ? ['Nosim ja', 'Ne mogu pustiti'] : ['Karikaj!', 'Ne karikaj']).map(t => [t, 1]);
+    const sigs = g.phase === 'over' || g.phase === 'hand' ? '' : `<div class="signals ${tre ? 'tre' : ''}">
+      ${sigList.map(([t, team]) => `<button class="team" data-sig="${t}" ${team ? 'data-team="1"' : ''}>${t}</button>`).join('')}
       ${['👍', '😂', '😮', '🙈', '😤'].map(t => `<button class="ghost" data-sig="${t}">${t}</button>`).join('')}
     </div>`;
 
@@ -465,18 +533,18 @@
     $app.innerHTML = `
       <div class="topbar">
         <button class="ghost small" id="leave">←</button>
-        <div class="mid">${MODE_NAMES[g.mode]}${g.low ? ' · ' + LOW_NAME : ''}${r.code ? ' · ' + esc(r.code) : ' · ' + LEVEL_NAMES[r.level]}${tally}</div>
+        <div class="mid">${MODE_NAMES[g.mode]}${kindLabel(g.kind || (g.low ? 'meno' : 'briskula'))}${r.code ? ' · ' + esc(r.code) : ' · ' + LEVEL_NAMES[r.level]}${tally}</div>
         <button class="ghost small" id="last" ${g.lastTrick ? '' : 'disabled'}>Zadnji štih</button>
         ${chatBtn()}
         <button class="ghost small" id="menuBtn">⚙</button>
       </div>
-      <div class="table mode${g.mode} ${g.mode >= 3 ? 'has-left' : ''}">
+      <div class="table mode${g.mode} ${g.mode >= 3 ? 'has-left' : ''} ${tre ? 'tre' : ''}">
         ${seats}${deck}
         <div class="trick" id="trick">${trickHtml}</div>
         <div class="status">${status}</div>
       </div>
-      <div class="me">${bubble(me)}
-        <div class="hand ${myTurn ? 'myturn' : ''}">${handHtml}</div>
+      <div class="me ${tre ? 'tre' : ''}">${bubble(me)}
+        <div class="hand ${myTurn ? 'myturn' : ''} ${many ? 'many' : ''}" style="--n:${hand.length}">${handHtml}</div>
         <div>${plate(me)}</div>
         ${sigs}
       </div>`;
@@ -489,6 +557,7 @@
       el.style.transform = 'translateY(-30px)';
       ctrl.play(el.dataset.card);
     });
+    $app.querySelectorAll('.hand .card.dim').forEach(el => el.onclick = () => toast('Moraš odgovoriti na boju'));
     $app.querySelectorAll('[data-sig]').forEach(b => b.onclick = () => {
       const k = Date.now(); if (k - (renderGame.lastSig || 0) < 1500) return; renderGame.lastSig = k;
       ctrl.signal(b.dataset.sig, !!b.dataset.team);
@@ -520,9 +589,10 @@
       <div class="row" style="margin-top:12px"><button class="ghost" id="rulesB">Pravila</button><button id="close">Zatvori</button></div>`;
     else if (modal === 'last' && g && g.lastTrick) html = `<h2>Zadnji štih</h2>
       <div class="lasttrick">${g.lastTrick.cards.map(t => `<div style="text-align:center"><div class="card">${Art.face(t.card)}</div><div class="muted">${esc(g.players[t.p].name)}</div></div>`).join('')}</div>
-      <p style="text-align:center">Nosi: <b>${esc(g.players[g.lastTrick.winner].name)}</b> (+${g.lastTrick.points})</p>
+      <p style="text-align:center">Nosi: <b>${esc(g.players[g.lastTrick.winner].name)}</b> (+${ptsText(g, g.lastTrick.points)})${g.lastTrick.last ? ' · zadnji štih' : ''}</p>
       <button id="close" style="width:100%">Zatvori</button>`;
-    else if (g && g.phase === 'over') html = resultHtml();
+    else if (g && g.phase === 'over') html = g.kind === 'treseta' ? tresetaResultHtml() : resultHtml();
+    else if (g && g.phase === 'hand') html = handEndHtml();
     if (!html) { if (el) el.remove(); return; }
     if (!el) { el = document.createElement('div'); el.id = 'overlay'; el.className = 'overlay'; document.body.appendChild(el); }
     el.innerHTML = `<div class="modal">${html}</div>`;
@@ -530,6 +600,7 @@
     const sp = el.querySelector('#sp'); if (sp) sp.onchange = () => { S.showPoints = sp.checked; save(); render(); };
     const snd = el.querySelector('#snd'); if (snd) snd.onchange = () => { S.sound = snd.checked; save(); };
     const rb = el.querySelector('#rulesB'); if (rb) rb.onclick = () => { modal = 'rules'; render(); };
+    const nx = el.querySelector('#nextHand'); if (nx) nx.onclick = () => ctrl.next();
     const again = el.querySelector('#again'); if (again) again.onclick = () => { ctrl.rematch(); };
     const lobby = el.querySelector('#lobby'); if (lobby) lobby.onclick = () => ctrl.send({ type: 'toLobby' });
     const out = el.querySelector('#out'); if (out) out.onclick = leave;
@@ -559,7 +630,64 @@
       <div class="row" style="margin-top:8px">${!r.local && r.host ? '<button class="ghost" id="lobby">Natrag u sobu</button>' : ''}<button class="ghost" id="out">Izlaz</button></div>`;
   }
 
+  // ---------- trešeta: kraj ruke i kraj partije ----------
+  function teamName(g, t, me) {
+    const ps = E.teamOf(g.mode, me) === t;
+    const names = (g.mode === 4 ? [t, t + 2] : [t]).map(p => esc(g.players[p].name)).join(' & ');
+    return names + (ps ? (g.mode === 4 ? ' (vi)' : ' (ti)') : '');
+  }
+  function handEndHtml() {
+    const r = room, g = r.game, me = g.you, hr = g.handResult;
+    if (!hr) return '';
+    const max = Math.max(...g.score);
+    const tie = max >= g.target && g.score.filter(x => x === max).length > 1;
+    const rows = hr.teams.map(t => `<tr>
+        <td>${teamName(g, t.team, me)}${t.akuze.length ? `<div class="muted ak">${t.akuze.map(a => esc(a.text) + ' +' + a.pts).join(', ')}</div>` : ''}</td>
+        <td>${T.fmt(t.cardBele)}</td><td>${t.last ? '+1' : ''}</td><td>${t.akPts ? '+' + t.akPts : ''}</td><td><b>${t.points}</b></td><td class="tot">${t.total}</td></tr>`).join('');
+    const canGo = r.local || r.host;
+    return `<h2>Kraj ${hr.handNo}. ruke</h2>
+      <table class="scores hand-table"><tr class="th"><td></td><td>Karte</td><td>Zadnji</td><td>Akuže</td><td>Ruka</td><td>Ukupno</td></tr>${rows}</table>
+      <p class="muted" style="text-align:center">${tie ? `Izjednačeno na ${max} – igra se još jedna ruka.` : `Igra se do ${g.target} bodova.`} Bele (trećine) koje ne čine cijeli bod se ne broje.</p>
+      ${canGo ? '<button id="nextHand" style="width:100%">Sljedeća ruka</button>' : '<p class="muted" style="text-align:center">Sljedeća ruka počinje za nekoliko sekundi…</p>'}`;
+  }
+  function tresetaResultHtml() {
+    const r = room, g = r.game, res = g.result, me = g.you;
+    const myTeam = E.teamOf(g.mode, me);
+    const won = res.winners.includes(me);
+    const title = won ? (g.mode === 4 ? 'Pobijedili ste!' : 'Pobijedio/la si!') : (g.mode === 4 ? 'Izgubili ste' : 'Izgubio/la si');
+    const rows = res.scores.slice().sort((a, b) => b.points - a.points).map(s =>
+      `<tr class="${res.winners.join() === s.players.join() ? 'win' : ''}"><td>${teamName(g, s.team, me)}</td><td>${s.points}</td></tr>`).join('');
+    const n = res.scores.length;
+    const head = res.scores.map(s => `<td>${g.mode === 4 ? (s.team === myTeam ? 'Mi' : 'Vi') : esc(g.players[s.team].name.replace(/^Bot /, ''))}</td>`).join('');
+    const hist = res.hands.map(h => `<tr><td>${h.handNo}.</td>${h.points.map((p, t) => `<td>${p} <span class="muted">(${h.score[t]})</span></td>`).join('')}</tr>`).join('');
+    const tally = g.mode === 4 ? `Ukupno partija: <b>${r.wins[myTeam]} : ${r.wins[1 - myTeam]}</b>` : 'Pobjede: ' + r.seats.map((s, i) => esc(s.name) + ' ' + r.wins[i]).join(' · ');
+    const canRestart = r.local || r.host;
+    return `<div class="result-big">${title}</div>
+      <table class="scores">${rows}</table>
+      <details class="hist"><summary class="muted">Bodovi po rukama</summary>
+        <table class="scores small"><tr class="th"><td>Ruka</td>${head}</tr>${hist}</table></details>
+      <p class="muted" style="text-align:center">${tally}</p>
+      ${canRestart ? '<button id="again" style="width:100%">Nova partija</button>' : '<p class="muted" style="text-align:center">Čeka se domaćin za novu partiju…</p>'}
+      <div class="row" style="margin-top:8px">${!r.local && r.host ? '<button class="ghost" id="lobby">Natrag u sobu</button>' : ''}<button class="ghost" id="out">Izlaz</button></div>`;
+  }
+
+  function tresetaRulesHtml() {
+    return `<div class="rules"><h2>Pravila trešete</h2>
+      <p>Igra se s 40 karata (kupe, dinari, špade, bate). <b>Nema briškule</b> (aduta). Jačina karata od najjače: <b>trica, dvica, as, kralj, konj, fanat</b>, pa 7, 6, 5, 4.</p>
+      <ul>
+        <li><b>Mora se odgovoriti na boju.</b> Tko nema boju, baca bilo koju kartu. Štih nosi najjača karta boje koja je prva bačena.</li>
+        <li><b>Bodovi:</b> as vrijedi 1 bod, a trica, dvica, kralj, konj i fanat po ⅓ boda (jedna „bela”). Zadnji štih nosi još 1 bod. Na kraju ruke bele koje ne čine cijeli bod se ne broje, pa ruka vrijedi 11 bodova.</li>
+        <li><b>Akuže</b> se prijavljuju same na početku ruke: <b>napolitana</b> (trica, dvica i as iste boje) 3 boda, <b>tri trice / dvice / asa</b> 3 boda, <b>sve četiri</b> 4 boda. Te karte svi vide.</li>
+        <li>Igra se u više ruku <b>do 41 boda</b> (može i do 21 ili 31). Pobjeđuje tko prvi dođe do cilja na kraju ruke; ako su dvije strane izjednačene, igra se još jedna ruka.</li>
+        <li><b>U parovima</b> (2 na 2) suigrači sjede nasuprot, svatko dobije 10 karata. Smiju se reći znakovi „Kucam” (uzmi najjačom), „Strišo” (imam još te boje) i „Volo” (to mi je zadnja te boje).</li>
+        <li><b>U dvoje</b> svatko dobije 10 karata, a ostalih 20 su špil: nakon svakog štiha svatko vuče jednu kartu (prvi tko je nosio štih) i <b>pokaže je</b>, pa se te karte vide licem prema gore.</li>
+        <li><b>U troje</b> se izbacuje četvorka dinara (39 karata), svatko dobije 13 i igra za sebe.</li>
+      </ul>
+      <button id="close" style="width:100%">Zatvori</button></div>`;
+  }
+
   function rulesHtml() {
+    if ((room ? room.kind : S.kind) === 'treseta') return tresetaRulesHtml();
     return `<div class="rules"><h2>Pravila briškule</h2>
       <p>Igra se s 40 karata u četiri boje: <b>kupe, dinari, špade i bate</b>. Jačina karata od najjače: <b>as, trica, kralj, konj, fanat</b>, pa 7, 6, 5, 4, 2.</p>
       <p>Bodovi: as 11, trica 10, kralj 4, konj 3, fanat 2, ostale 0. Ukupno ima 120 bodova, a pobjeđuje tko skupi više od 60 (60:60 je neriješeno).</p>

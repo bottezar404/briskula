@@ -8,7 +8,7 @@ Radi u pregledniku i može se instalirati na mobitel kao aplikacija (PWA).
 ```bash
 npm install
 npm start          # http://localhost:3000
-npm test           # simulacija 16000 partija botova (obje vrste igre) + provjera pravila
+npm test           # simulacija partija botova (briškula, chi fa meno, trešeta) + provjera pravila
 ```
 
 ## Što ima
@@ -21,6 +21,11 @@ npm test           # simulacija 16000 partija botova (obje vrste igre) + provjer
 - **Chi fa meno** („tko napravi manje”) – iste karte i pravila, ali pobjeđuje tko skupi **manje** bodova.
   Tko pokupi svih 120 bodova (kapot), odmah pobjeđuje. Radi u dvoje, troje i parovima, s botovima i online;
   botovi tada igraju da izbjegnu bodove i „utovare” ih protivniku.
+- **Trešeta** – bez briškule, mora se odgovoriti na boju; jačina 3-2-as-kralj-konj-fanat-7-6-5-4.
+  As 1 bod, figure/trica/dvica po ⅓ (bela), zadnji štih 1 bod (11 bodova po ruci). Akuže (napolitana,
+  tri/četiri trice, dvice ili asa) se prijavljuju same. Igra se u više ruku do 41 (ili 21/31).
+  Parovi (10 karata), dvoje (10 karata + vučenje iz špila, izvučene karte se pokazuju) i troje (bez četvorke dinara, 13 karata).
+  Botovi na 3 razine (teški bot simulira moguće rasporede karata, a u završnici u dvoje igra savršeno).
 - Ako igrač izgubi vezu, može se vratiti (osvježi stranicu); nakon 25 s bot odigra umjesto njega.
 - Originalne karte nacrtane u SVG-u (`public/cards.js`).
 
@@ -28,6 +33,7 @@ npm test           # simulacija 16000 partija botova (obje vrste igre) + provjer
 
 - `public/engine.js` – pravila (dijeli ih preglednik i server)
 - `public/bot.js` – botovi (teški bot u završnici u dvoje igra savršeno)
+- `public/treseta.js`, `public/treseta-bot.js` – pravila i botovi za trešetu
 - `public/app.js`, `style.css`, `index.html` – sučelje
 - `public/sw.js`, `manifest.webmanifest`, `icons/` – PWA
 - `server/index.js` – Node server (statičke datoteke + WebSocket na `/ws`)

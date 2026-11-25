@@ -392,3 +392,14 @@ label.upload:active { transform: scale(.98); }
 @keyframes tt-blink { 50% { transform: scale(1.15); } }
 .ttn.low { color: #ff7a6a; }
 .forfeit { text-align: center; margin: 4px 0 10px; padding: 8px 10px; border-radius: 10px; background: rgba(184,50,42,.25); border: 1px solid rgba(255,90,74,.5); }
+
+/* dužina pišulinca ispod avatara u igri */
+.avw { display: inline-flex; flex-direction: column; align-items: center; gap: 2px; flex: none; }
+.cml { background: var(--gold); color: #3a2a08; font-size: 10px; font-weight: 800; line-height: 1; padding: 2px 5px; border-radius: 7px; white-space: nowrap; box-shadow: 0 1px 3px rgba(0,0,0,.4); }
+.cml.secret { background: rgba(0,0,0,.5); color: #fff; font-weight: 600; opacity: .85; }
+@media (min-width: 900px) and (min-height: 520px) { .cml { font-size: 12px; padding: 3px 7px; } }
+/* parovi: zbrojeni bodovi para */
+.tscore .ts .dot { width: 8px; height: 8px; vertical-align: 1px; }
+.tscore .tsh { margin-top: 5px; padding-top: 4px; border-top: 1px solid rgba(255,255,255,.15); }
+.pscore { position: absolute; right: 8px; top: 74%; transform: translateY(-50%); z-index: 3; }
+@media (min-width: 900px) and (min-height: 520px) { .pscore { right: 20px; top: auto; bottom: 20px; transform: none; } }

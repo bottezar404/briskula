@@ -200,12 +200,19 @@
     return st.low ? opp - mine : mine - opp;
   }
 
+  // lagani pogled za simulaciju: bez kopiranja (heuristika ništa ne mijenja)
+  function simView(st, p) {
+    const played = [];
+    for (const pl of st.players) for (const c of pl.won) played.push(c);
+    return { mode: st.mode, you: p, low: st.low, hand: st.players[p].hand, trick: st.trick, played, known: st.known, voids: st.voids };
+  }
+
   function playout(st, first, me) {
     T.play(st, st.turn, first);
     let guard = 0;
     while (st.phase === 'play' || st.phase === 'collect') {
       if (st.phase === 'collect') { T.collect(st); continue; }
-      const c = heuristic(T.viewFor(st, st.turn));
+      const c = heuristic(simView(st, st.turn));
       T.play(st, st.turn, c);
       if (++guard > 200) break;
     }

@@ -116,11 +116,11 @@
         this.E.collect(st);
         if (st.phase === 'over' && !st.result.draw) this.wins[E.teamOf(this.mode, st.result.winners[0])]++;
         this.emit(); this.schedule();
-      }, 1350);
+      }, this.kind === 'treseta' ? 1000 : 1350);
       else if (st.phase === 'play' && st.turn !== 0) this.timer = setTimeout(() => {
         const c = this.B.choose(this.E.viewFor(st, st.turn), this.level);
         this.E.play(st, st.turn, c); this.emit(); this.schedule();
-      }, 650 + Math.random() * 450);
+      }, this.kind === 'treseta' ? 400 + Math.random() * 300 : 650 + Math.random() * 450);
     }
     play(c) { if (this.E.play(this.st, 0, c)) { this.emit(); this.schedule(); } }
     next() { if (this.st.phase === 'hand') { T.nextHand(this.st); this.signals = []; this.emit(); this.schedule(); } }
@@ -656,7 +656,7 @@
     clearTimeout(flyTimer);
     if (g.phase === 'collect') {
       const w = g.trick[winIdx].p;
-      flyTimer = setTimeout(() => { const t = document.getElementById('trick'); if (t) t.className = 'trick fly-' + posOf(w, g); }, 850);
+      flyTimer = setTimeout(() => { const t = document.getElementById('trick'); if (t) t.className = 'trick fly-' + posOf(w, g); }, tre ? 600 : 850);
     }
     // osvježi kad mjehurići isteknu
     clearTimeout(renderGame.bt);
@@ -757,11 +757,12 @@
     const rows = hr.teams.map(t => `<tr>
         <td>${teamName(g, t.team, me)}${t.akuze.length ? `<div class="muted ak">${t.akuze.map(a => esc(a.text) + ' +' + a.pts).join(', ')}</div>` : ''}</td>
         <td>${T.fmt(t.cardBele)}</td><td>${t.last ? '+1' : ''}</td>${ak ? `<td>${t.akPts ? '+' + t.akPts : ''}</td>` : ''}<td><b>${t.points}</b>${t.kapot ? ' <span class="muted">kapot</span>' : ''}</td><td class="tot">${t.total}</td></tr>`).join('');
-    const canGo = r.local || r.host;
+    const myReady = !r.local && (r.ready || []).includes(me);
+    const humans = r.local ? 1 : r.seats.filter(s => s && !s.bot && s.connected).length;
     return `<h2>Kraj ${hr.handNo}. ruke</h2>
       <table class="scores hand-table"><tr class="th"><td></td><td>Karte</td><td>Zadnji</td>${ak ? '<td>Akuže</td>' : ''}<td>Ruka</td><td>Ukupno</td></tr>${rows}</table>
       <p class="muted" style="text-align:center">${hr.teams.some(t => t.kapot) ? '<b>Kapot!</b> Tko pokupi sve bodove dobije 0, a ostali po 11. ' : ''}${tie ? 'Izjednačeno – igra se još jedna ruka.' : g.low ? `${LOW_NAME}: kad netko dođe do ${g.target}, pobjeđuje tko ima najmanje.` : `Igra se do ${g.target} bodova.`} Bele (trećine) koje ne čine cijeli bod se ne broje.</p>
-      ${canGo ? '<button id="nextHand" style="width:100%">Sljedeća ruka</button>' : '<p class="muted" style="text-align:center">Sljedeća ruka počinje za nekoliko sekundi…</p>'}`;
+      ${!myReady ? '<button id="nextHand" style="width:100%">Sljedeća ruka</button>' : `<p class="muted" style="text-align:center">Čeka se ostale (${(r.ready || []).length}/${humans})… Sljedeća ruka počinje za nekoliko sekundi.</p>`}`;
   }
   function tresetaResultHtml() {
     const r = room, g = r.game, res = g.result, me = g.you;

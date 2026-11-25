@@ -400,6 +400,57 @@ label.upload:active { transform: scale(.98); }
 @media (min-width: 900px) and (min-height: 520px) { .cml { font-size: 12px; padding: 3px 7px; } }
 /* parovi: zbrojeni bodovi para */
 .tscore .ts .dot { width: 8px; height: 8px; vertical-align: 1px; }
-.tscore .tsh { margin-top: 5px; padding-top: 4px; border-top: 1px solid rgba(255,255,255,.15); }
+.tscore .tsh { margin-top: 2px; font-size: 10px; }
+.tscore .ts em { font-style: normal; font-weight: 600; font-size: .85em; color: var(--cream); opacity: .75; }
 .pscore { position: absolute; right: 8px; top: 74%; transform: translateY(-50%); z-index: 3; }
 @media (min-width: 900px) and (min-height: 520px) { .pscore { right: 20px; top: auto; bottom: 20px; transform: none; } }
+
+/* ---------- mobitel: kompaktniji stol (manje karte, pločice i gumbi) ---------- */
+@media (max-width: 899px) {
+  :root { --cw: min(24vw, 13.5vh, 112px); --sw: min(10vw, 6vh, 46px); }
+  .mode4 { --sw: min(8.5vw, 4.8vh, 40px); }
+  .topbar { padding: 4px 6px; font-size: 13px; }
+  .topbar button.small { padding: 6px 9px; font-size: 13px; }
+  .nameplate, .mode4 .nameplate { font-size: 13px; padding: 3px 9px; gap: 5px; border-width: 1.5px; }
+  .nameplate .pts { font-size: 1.1em; }
+  .pl { gap: 4px; }
+  .pl .av { --s: 28px; }
+  .cml { font-size: 9px; padding: 1px 4px; border-radius: 6px; }
+  .avw { gap: 1px; }
+  .seat { gap: 2px; }
+  .seat.top { top: 2px; }
+  .mode4 .seat.top { gap: 6px; }
+  .mode4 .seat.left, .mode4 .seat.right { top: calc(var(--sw) * 1.6 + 46px); }
+  .tcards .hc { font-size: 13px; }
+  /* karte na stolu manje i bliže sredini da ne prekrivaju igrače sa strane */
+  .trick .card { width: calc(var(--cw) * .72); height: calc(var(--ch) * .72); left: calc(var(--cw) * -0.36); top: calc(var(--ch) * -0.36); }
+  .trick .pos-left { transform: translate(-58%, 0) rotate(-9deg); }
+  .trick .pos-right { transform: translate(58%, 0) rotate(8deg); }
+  .trick .pos-top { transform: translate(0, -34%) rotate(-3deg); }
+  .trick .pos-bottom { transform: translate(0, 34%) rotate(2deg); }
+  .mode4 .trick, .mode3 .trick { top: 57%; }
+  .status { font-size: 15px; bottom: 4px; }
+  .deck .count, .tdeck .count { font-size: 14px; }
+  .tinfo { bottom: 28px; left: 6px; gap: 6px; }
+  .deck, .has-left .deck { bottom: 28px; left: 6px; }
+  .tscore { font-size: 12px; padding: 4px 7px; min-width: 0; border-radius: 8px; }
+  .tscore .muted { font-size: 10px; }
+  .tscore .ts { gap: 8px; }
+  .pscore { top: auto; bottom: 28px; right: 6px; transform: none; }
+  .me { padding: 2px 4px 6px; gap: 4px; }
+  .hand { gap: 5px; }
+  .hand.myturn .card.playable { transform: translateY(-4px); }
+  .signals { gap: 4px; }
+  .signals button { padding: 4px 8px; font-size: 12px; }
+  .bubble { font-size: 13px; padding: 5px 9px; }
+}
+@media (max-width: 899px) and (max-height: 760px) {
+  :root { --cw: min(23vw, 12.5vh, 104px); }
+  .nameplate, .mode4 .nameplate { font-size: 12px; padding: 2px 8px; }
+}
+/* gornji igrač: oblačić ispod avatara, da ne ide preko gornje trake */
+.seat.top .av .bubble { bottom: auto; top: calc(100% + 9px); transform-origin: 50% 0; }
+.seat.top .av .bubble::after { top: auto; bottom: 100%; border-top-color: transparent; border-bottom: 7px solid var(--cream); border-top: 0; }
+.seat.top .av .bubble.team::after { border-bottom-color: #dce8ff; }
+.seat.top .av .bubble.akuza::after { border-bottom-color: #fff1bf; }
+.seat:has(.bubble) { z-index: 6; }

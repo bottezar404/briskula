@@ -578,8 +578,8 @@
       deck = `<div class="tinfo">
         ${g.deckCount > 0 ? `<div class="tdeck"><div class="card sm">${Art.back()}</div><div class="count">${g.deckCount}</div></div>` : ''}
         <div class="tscore"><div class="muted">Ruka ${g.handNo} · do ${g.target}</div>
-          ${order.map(t => `<div class="ts"><span>${g.mode === 4 ? `<i class="dot t${t}"></i> ` : ''}${esc(g.mode === 4 ? names[t === myT ? 0 : 1] : names[t])}</span><b>${g.score[t]}</b></div>`).join('')}
-          ${g.mode === 4 ? `<div class="muted tsh">Ova ruka: ${S.showPoints ? '' : 'štihovi'}</div>${pairRows}` : ''}
+          ${order.map(t => `<div class="ts"><span>${g.mode === 4 ? `<i class="dot t${t}"></i> ` : ''}${esc(g.mode === 4 ? names[t === myT ? 0 : 1] : names[t])}</span><b>${g.score[t]}${g.mode === 4 ? ` <em title="${S.showPoints ? 'bodovi u ovoj ruci' : 'štihovi u ovoj ruci'}">+${pairVal(t)}</em>` : ''}</b></div>`).join('')}
+          ${g.mode === 4 ? `<div class="muted tsh">+ ${S.showPoints ? 'ova ruka' : 'štihovi u ruci'}</div>` : ''}
         </div></div>`;
     } else if (g.deckCount > 0) {
       deck = `<div class="deck">

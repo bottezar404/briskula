@@ -18,13 +18,15 @@ npm test           # simulacija partija botova (briškula, chi fa meno, trešeta
   Prazna mjesta domaćin popuni botovima. „Brza igra” spaja s bilo kim tko čeka.
 - **Parovi** – suigrači nasuprot, tajni znakovi samo za suigrača, a kad se špil potroši vidiš karte suigrača.
 - **Troje** – izbacuje se dvica dinara (39 karata).
-- **Chi fa meno** („tko napravi manje”) – iste karte i pravila, ali pobjeđuje tko skupi **manje** bodova.
+- **Chi fa meno** („tko napravi manje”) – prekidač za **obje igre**. U briškuli: iste karte i pravila, ali pobjeđuje tko skupi **manje** bodova.
   Tko pokupi svih 120 bodova (kapot), odmah pobjeđuje. Radi u dvoje, troje i parovima, s botovima i online;
   botovi tada igraju da izbjegnu bodove i „utovare” ih protivniku.
 - **Trešeta** – bez briškule, mora se odgovoriti na boju; jačina 3-2-as-kralj-konj-fanat-7-6-5-4.
   As 1 bod, figure/trica/dvica po ⅓ (bela), zadnji štih 1 bod (11 bodova po ruci). Akuže (napolitana,
   tri/četiri trice, dvice ili asa) se prijavljuju same. Igra se u više ruku do 41 (ili 21/31).
   Parovi (10 karata), dvoje (10 karata + vučenje iz špila, izvučene karte se pokazuju) i troje (bez četvorke dinara, 13 karata).
+  **Trešeta Chi fa meno**: bez akuža, pobjeđuje tko ima manje; kapot (svi bodovi u ruci) = 0 za njega, 11 ostalima;
+  kad netko dođe do cilja, partija završava.
   Botovi na 3 razine (teški bot simulira moguće rasporede karata, a u završnici u dvoje igra savršeno).
 - Ako igrač izgubi vezu, može se vratiti (osvježi stranicu); nakon 25 s bot odigra umjesto njega.
 - Originalne karte nacrtane u SVG-u (`public/cards.js`).

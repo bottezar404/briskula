@@ -7,6 +7,12 @@ const crypto = require('crypto');
 const { WebSocketServer } = require('ws');
 const E = require('../public/engine.js');
 const B = require('../public/bot.js');
+const T = require('../public/treseta.js');
+const TB = require('../public/treseta-bot.js');
+const KINDS = ['briskula', 'meno', 'treseta'];
+const kindOf = m => KINDS.includes(m.kind) ? m.kind : (m.low ? 'meno' : 'briskula');
+const engOf = r => r.kind === 'treseta' ? T : E;
+const botOf = r => r.kind === 'treseta' ? TB : B;
 
 const PORT = process.env.PORT || 3000;
 const PUB = path.join(__dirname, '..', 'public');
@@ -34,7 +40,7 @@ const rooms = new Map();   // code -> room
 
 const BOT_NAMES = ['Bot Jure', 'Bot Mare', 'Bot Ante', 'Bot Frane', 'Bot Luce', 'Bot Šime', 'Bot Bepo', 'Bot Tonka'];
 const CHAT_LEN = 200, CHAT_KEEP = 50, CHAT_GAP = 700;
-const TRICK_PAUSE = 1400, BOT_DELAY = 750, AWAY_AUTOPLAY = 25000, ROOM_TTL = 30 * 60 * 1000;
+const HAND_PAUSE = 9000, TRICK_PAUSE = 1400, BOT_DELAY = 750, AWAY_AUTOPLAY = 25000, ROOM_TTL = 30 * 60 * 1000;
 
 function code() {
   const A = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -50,7 +56,7 @@ function createRoom(mode, host, opts) {
   const r = {
     code: code(), mode, seats: Array(mode).fill(null), host, game: null, timer: null,
     level: ['easy', 'normal', 'hard'].includes(opts.level) ? opts.level : 'normal',
-    isPublic: !!opts.isPublic, low: !!opts.low, signals: [], chat: [], chatSeq: 0, wins: Array(mode === 4 ? 2 : mode).fill(0), touched: Date.now(), awayTimer: null,
+    isPublic: !!opts.isPublic, kind: opts.kind || 'briskula', target: T.TARGETS.includes(+opts.target) ? +opts.target : 41, signals: [], chat: [], chatSeq: 0, wins: Array(mode === 4 ? 2 : mode).fill(0), touched: Date.now(), awayTimer: null,
   };
   rooms.set(r.code, r);
   return r;
@@ -114,10 +120,10 @@ function roomView(r, token) {
   const g = r.game;
   return {
     type: 'room',
-    code: r.code, mode: r.mode, level: r.level, isPublic: r.isPublic, low: r.low,
+    code: r.code, mode: r.mode, level: r.level, isPublic: r.isPublic, low: r.kind === 'meno', kind: r.kind, target: r.target,
     host: r.host === token, you, wins: r.wins,
     seats: r.seats.map(s => s ? { name: s.name, bot: !!s.bot, connected: s.bot || !!(clients.get(s.token) && clients.get(s.token).ws) } : null),
-    game: g ? E.viewFor(g, you) : null,
+    game: g ? engOf(r).viewFor(g, you) : null,
     signals: r.signals.filter(s => s.team == null || (you >= 0 && s.team === E.teamOf(r.mode, you))).slice(-6),
     chat: r.chat.slice(-30),
   };
@@ -131,7 +137,8 @@ function broadcast(r) {
 function startGame(r) {
   if (r.seats.some(s => !s)) return false;
   const prevDealer = r.game ? r.game.dealer : -1;
-  r.game = E.newGame(r.mode, { names: r.seats.map(s => s.name), bots: r.seats.map(s => !!s.bot), dealer: prevDealer + 1, low: r.low });
+  const o = { names: r.seats.map(s => s.name), bots: r.seats.map(s => !!s.bot), dealer: prevDealer + 1 };
+  r.game = r.kind === 'treseta' ? T.newGame(r.mode, Object.assign(o, { target: r.target })) : E.newGame(r.mode, Object.assign(o, { low: r.kind === 'meno' }));
   r.signals = [];
   broadcast(r); schedule(r);
   return true;
@@ -143,13 +150,16 @@ function schedule(r) {
   if (!g) return;
   if (g.phase === 'collect') {
     r.timer = setTimeout(() => {
-      E.collect(g);
+      engOf(r).collect(g);
       if (g.phase === 'over') {
         const res = g.result;
         if (!res.draw) r.wins[E.teamOf(r.mode, res.winners[0])]++;
       }
       broadcast(r); schedule(r);
     }, TRICK_PAUSE);
+  } else if (g.phase === 'hand') {
+    // kraj ruke u trešeti: kratka pauza za pregled bodova, pa nova ruka
+    r.timer = setTimeout(() => nextHand(r), HAND_PAUSE);
   } else if (g.phase === 'play') {
     const s = r.seats[g.turn];
     const c = s && !s.bot ? clients.get(s.token) : null;
@@ -158,12 +168,19 @@ function schedule(r) {
   }
 }
 
+function nextHand(r) {
+  const g = r.game;
+  if (!g || g.phase !== 'hand') return;
+  T.nextHand(g); r.signals = [];
+  broadcast(r); schedule(r);
+}
+
 function botMove(r) {
   const g = r.game;
   if (!g || g.phase !== 'play') return;
   const p = g.turn;
-  const card = B.choose(E.viewFor(g, p), r.seats[p].bot ? r.level : 'normal');
-  E.play(g, p, card);
+  const card = botOf(r).choose(engOf(r).viewFor(g, p), r.seats[p].bot ? r.level : 'normal');
+  engOf(r).play(g, p, card);
   broadcast(r); schedule(r);
 }
 
@@ -194,7 +211,7 @@ wss.on('connection', ws => {
         const mode = +m.mode;
         if (![2, 3, 4].includes(mode)) return err('Neispravan način igre.');
         leaveCurrent(token);
-        const nr = createRoom(mode, token, { level: m.level, isPublic: false, low: !!m.low });
+        const nr = createRoom(mode, token, { level: m.level, isPublic: false, kind: kindOf(m), target: m.target });
         joinRoom(nr, token);
         broadcast(nr); break;
       }
@@ -207,8 +224,9 @@ wss.on('connection', ws => {
       case 'quick': {
         const mode = +m.mode;
         if (![2, 3, 4].includes(mode)) return err('Neispravan način igre.');
-        let nr = [...rooms.values()].find(x => x.isPublic && x.mode === mode && x.low === !!m.low && !x.game && x.seats.includes(null) && seatOf(x, token) < 0);
-        if (!nr) { leaveCurrent(token); nr = createRoom(mode, token, { isPublic: true, low: !!m.low }); }
+        const kind = kindOf(m);
+        let nr = [...rooms.values()].find(x => x.isPublic && x.mode === mode && x.kind === kind && !x.game && x.seats.includes(null) && seatOf(x, token) < 0);
+        if (!nr) { leaveCurrent(token); nr = createRoom(mode, token, { isPublic: true, kind }); }
         joinRoom(nr, token);
         if (!nr.seats.includes(null)) startGame(nr); else broadcast(nr);
         break;
@@ -225,7 +243,9 @@ wss.on('connection', ws => {
       }
       case 'addBot': if (r && r.host === token && !r.game) { addBot(r); broadcast(r); } break;
       case 'kick': if (r && r.host === token && !r.game) { const s = r.seats[+m.seat]; if (s && s.bot) { r.seats[+m.seat] = null; broadcast(r); } } break;
-      case 'variant': if (r && r.host === token && !r.isPublic && (!r.game || r.game.phase === 'over')) { r.low = !!m.low; r.game = null; r.wins = r.wins.map(() => 0); broadcast(r); } break;
+      case 'variant': if (r && r.host === token && !r.isPublic && (!r.game || r.game.phase === 'over')) { r.kind = kindOf(m); r.game = null; r.wins = r.wins.map(() => 0); broadcast(r); } break;
+      case 'target': if (r && r.host === token && T.TARGETS.includes(+m.target) && (!r.game || r.game.phase === 'over')) { r.target = +m.target; r.game = null; broadcast(r); } break;
+      case 'next': if (r && r.host === token && r.game && r.game.phase === 'hand') nextHand(r); break;
       case 'level': if (r && r.host === token && ['easy', 'normal', 'hard'].includes(m.level)) { r.level = m.level; broadcast(r); } break;
       case 'start':
         if (!r || r.host !== token) return;
@@ -237,7 +257,7 @@ wss.on('connection', ws => {
       case 'play': {
         if (!r || !r.game) return;
         const p = seatOf(r, token);
-        if (E.play(r.game, p, String(m.card))) { broadcast(r); schedule(r); }
+        if (engOf(r).play(r.game, p, String(m.card))) { broadcast(r); schedule(r); }
         break;
       }
       case 'signal': {

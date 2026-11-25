@@ -501,6 +501,8 @@
   function renderGame() {
     const r = room, g = r.game, me = g.you;
     const tre = g.kind === 'treseta';
+    // online: po pravilima se bodovi broje sami, pa se tijekom ruke ne prikazuju (samo ukupni rezultat)
+    const secret = !r.local;
     const G = engOf(g.kind);
     const myTurn = g.phase === 'play' && g.turn === me;
     const now = Date.now();
@@ -528,7 +530,7 @@
       const off = seat && !seat.bot && !seat.connected;
       const turn = g.phase === 'play' && g.turn === p;
       // u parovima bodovi nisu po igraču nego zajedno za par (vidi pairBox)
-      const pts = g.mode === 4 ? '' : S.showPoints ? `<span class="pts">${ptsText(g, pl.points)}</span>` : `<span class="muted">${pl.wonCount}</span>`;
+      const pts = g.mode === 4 || secret ? '' : S.showPoints ? `<span class="pts">${ptsText(g, pl.points)}</span>` : `<span class="muted">${pl.wonCount}</span>`;
       const who = seat || { name: pl.name };
       const av = S.showCm
         ? `<span class="avw">${avatar(Object.assign({}, who, { cm: 0 }), turn ? 'turn' : '', bubble(p) + turnRing(r, g, p))}<span class="cml ${who.cm ? '' : 'secret'}" title="Dužina pišulinca">${who.cm ? who.cm + ' cm' : 'tajna'}</span></span>`
@@ -569,6 +571,9 @@
     const pairVal = t => S.showPoints ? ptsText(g, teamSum(t, 'points')) : teamSum(t, 'wonCount');
     const pairRows = g.mode === 4 ? [[myT, 'Mi'], [1 - myT, 'Vi']].map(([t, n]) => `<div class="ts"><span><i class="dot t${t}"></i> ${n}</span><b>${pairVal(t)}</b></div>`).join('') : '';
     const pairHead = S.showPoints ? 'Bodovi parova' : 'Štihovi parova';
+    // ukupni rezultat (dobivene partije) za online briškulu
+    const winRows = (g.mode === 4 ? [[myT, 'Mi'], [1 - myT, 'Vi']] : g.players.map((_, i) => (me + i) % g.mode).map(q => [q, q === me ? 'Ti' : esc(g.players[q].name.replace(/^Bot /, ''))]))
+      .map(([t, n]) => `<div class="ts"><span>${g.mode === 4 ? `<i class="dot t${t}"></i> ` : ''}${n}</span><b>${(r.wins || [])[t] || 0}</b></div>`).join('');
 
     // špil + briškula (u trešeti nema briškule; u dvoje se vuče iz špila)
     let deck;
@@ -578,8 +583,8 @@
       deck = `<div class="tinfo">
         ${g.deckCount > 0 ? `<div class="tdeck"><div class="card sm">${Art.back()}</div><div class="count">${g.deckCount}</div></div>` : ''}
         <div class="tscore"><div class="muted">Ruka ${g.handNo} · do ${g.target}</div>
-          ${order.map(t => `<div class="ts"><span>${g.mode === 4 ? `<i class="dot t${t}"></i> ` : ''}${esc(g.mode === 4 ? names[t === myT ? 0 : 1] : names[t])}</span><b>${g.score[t]}${g.mode === 4 ? ` <em title="${S.showPoints ? 'bodovi u ovoj ruci' : 'štihovi u ovoj ruci'}">+${pairVal(t)}</em>` : ''}</b></div>`).join('')}
-          ${g.mode === 4 ? `<div class="muted tsh">+ ${S.showPoints ? 'ova ruka' : 'štihovi u ruci'}</div>` : ''}
+          ${order.map(t => `<div class="ts"><span>${g.mode === 4 ? `<i class="dot t${t}"></i> ` : ''}${esc(g.mode === 4 ? names[t === myT ? 0 : 1] : names[t])}</span><b>${g.score[t]}${g.mode === 4 && !secret ? ` <em title="${S.showPoints ? 'bodovi u ovoj ruci' : 'štihovi u ovoj ruci'}">+${pairVal(t)}</em>` : ''}</b></div>`).join('')}
+          ${g.mode === 4 && !secret ? `<div class="muted tsh">+ ${S.showPoints ? 'ova ruka' : 'štihovi u ruci'}</div>` : ''}
         </div></div>`;
     } else if (g.deckCount > 0) {
       deck = `<div class="deck">
@@ -589,7 +594,8 @@
     } else {
       deck = `<div class="trumpinfo">${Art.suit(g.trumpSuit, .85)}<span>briškula</span></div>`;
     }
-    if (!tre && g.mode === 4) deck += `<div class="tscore pscore"><div class="muted">${pairHead}</div>${pairRows}</div>`;
+    if (!tre && secret) deck += `<div class="tscore pscore"><div class="muted">Rezultat (partije)</div>${winRows}</div>`;
+    else if (!tre && g.mode === 4) deck += `<div class="tscore pscore"><div class="muted">${pairHead}</div>${pairRows}</div>`;
 
     // štih
     const showTrick = g.trick.length ? g.trick : [];
@@ -612,7 +618,7 @@
       let pts = g.trick.reduce((s, t) => s + G.points(t.card), 0);
       const lastOne = tre && g.deckCount === 0 && g.players.every(pl => pl.handCount === 0);
       if (lastOne) pts += T.LAST_BELE;
-      status = (w === me ? 'Tvoj štih' : (g.mode === 4 && w % 2 === me % 2 ? 'Štih za vaš par' : 'Štih nosi ' + esc(g.players[w].name))) + (pts ? ` (+${ptsText(g, pts)})` : '') + (lastOne ? ' · zadnji štih' : '');
+      status = (w === me ? 'Tvoj štih' : (g.mode === 4 && w % 2 === me % 2 ? 'Štih za vaš par' : 'Štih nosi ' + esc(g.players[w].name))) + (pts && !secret ? ` (+${ptsText(g, pts)})` : '') + (lastOne ? ' · zadnji štih' : '');
     }
     else if (g.phase === 'hand') status = 'Kraj ruke';
     if (sysMsg) status = esc(sysMsg.text);
@@ -634,7 +640,7 @@
     </div>`;
 
     let tally = '';
-    if (r.wins && r.wins.some(x => x)) tally = g.mode === 4 ? ` · ${r.wins[me % 2]}:${r.wins[1 - me % 2]}` : ` · pobjede ${r.wins[me]}`;
+    if (r.wins && r.wins.some(x => x) && !(secret && !tre)) tally = g.mode === 4 ? ` · ${r.wins[me % 2]}:${r.wins[1 - me % 2]}` : ` · pobjede ${r.wins[me]}`;
 
     $app.innerHTML = `
       <div class="topbar">
@@ -690,7 +696,8 @@
     const g = room && room.game;
     if (modal === 'rules') html = rulesHtml();
     else if (modal === 'settings') html = `<h2>Postavke</h2>
-      <label class="chk"><input type="checkbox" id="sp" ${S.showPoints ? 'checked' : ''}> Prikaži bodove tijekom igre</label>
+      ${room && !room.local && room.game ? '<p class="muted">U online igri bodovi se tijekom ruke ne prikazuju, po pravilima ih brojiš sam/a. Vidi se samo ukupni rezultat.</p>' : ''}
+      <label class="chk"><input type="checkbox" id="sp" ${S.showPoints ? 'checked' : ''}> Prikaži bodove tijekom igre (protiv botova)</label>
       <label class="chk"><input type="checkbox" id="scm" ${S.showCm ? 'checked' : ''}> Prikaži dužinu pišulinca ispod avatara</label>
       <label class="chk"><input type="checkbox" id="snd" ${S.sound ? 'checked' : ''}> Zvukovi</label>
       <div class="row" style="margin-top:12px"><button class="ghost" id="rulesB">Pravila</button><button id="close">Zatvori</button></div>`;
@@ -705,7 +712,7 @@
     }
     else if (modal === 'last' && g && g.lastTrick) html = `<h2>Zadnji štih</h2>
       <div class="lasttrick">${g.lastTrick.cards.map(t => `<div style="text-align:center"><div class="card">${Art.face(t.card)}</div><div class="muted">${esc(g.players[t.p].name)}</div></div>`).join('')}</div>
-      <p style="text-align:center">Nosi: <b>${esc(g.players[g.lastTrick.winner].name)}</b> (+${ptsText(g, g.lastTrick.points)})${g.lastTrick.last ? ' · zadnji štih' : ''}</p>
+      <p style="text-align:center">Nosi: <b>${esc(g.players[g.lastTrick.winner].name)}</b>${room.local ? ` (+${ptsText(g, g.lastTrick.points)})` : ''}${g.lastTrick.last ? ' · zadnji štih' : ''}</p>
       <button id="close" style="width:100%">Zatvori</button>`;
     else if (g && g.phase === 'over') html = g.kind === 'treseta' ? tresetaResultHtml() : resultHtml();
     else if (g && g.phase === 'hand') html = handEndHtml();

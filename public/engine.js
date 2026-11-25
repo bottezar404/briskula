@@ -54,7 +54,9 @@
 
   /**
    * mode: 2, 3 ili 4 (4 = parovi, suigrači sjede nasuprot: 0+2 protiv 1+3)
-   * opts: { names:[], bots:[bool], dealer, rng, showPartner }
+   * opts: { names:[], bots:[bool], dealer, rng, showPartner, low }
+   * low: "Chi fa meno" – pobjeđuje tko skupi MANJE bodova
+   *      (tko pokupi svih 120 bodova, "kapot", odmah pobjeđuje)
    */
   function newGame(mode, opts) {
     opts = opts || {};
@@ -77,6 +79,7 @@
       phase: 'play', // play | collect | over
       trickNo: 0, result: null,
       showPartner: opts.showPartner !== false,
+      low: !!opts.low,
       log: [],
     };
   }
@@ -131,6 +134,14 @@
     } else {
       for (let p = 0; p < st.mode; p++) scores.push({ team: p, players: [p], points: playerPoints(st, p) });
     }
+    if (st.low) {
+      const total = scores.reduce((a, s) => a + s.points, 0);
+      const kapot = scores.find(s => s.points === total);
+      if (kapot) return { scores, winners: kapot.players, draw: false, low: true, kapot: true };
+      const min = Math.min(...scores.map(s => s.points));
+      const low = scores.filter(s => s.points === min);
+      return { scores, winners: low.length === 1 ? low[0].players : [], draw: low.length > 1, low: true };
+    }
     const max = Math.max(...scores.map(s => s.points));
     const top = scores.filter(s => s.points === max);
     return { scores, winners: top.length === 1 ? top[0].players : [], draw: top.length > 1 };
@@ -142,6 +153,7 @@
     const partner = st.mode === 4 ? (p + 2) % 4 : -1;
     return {
       mode: st.mode,
+      low: !!st.low,
       you: p,
       players: st.players.map((pl, i) => ({
         name: pl.name, bot: pl.bot, handCount: pl.hand.length, team: teamOf(st.mode, i),

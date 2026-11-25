@@ -47,7 +47,7 @@ function createRoom(mode, host, opts) {
   const r = {
     code: code(), mode, seats: Array(mode).fill(null), host, game: null, timer: null,
     level: ['easy', 'normal', 'hard'].includes(opts.level) ? opts.level : 'normal',
-    isPublic: !!opts.isPublic, signals: [], wins: Array(mode === 4 ? 2 : mode).fill(0), touched: Date.now(), awayTimer: null,
+    isPublic: !!opts.isPublic, low: !!opts.low, signals: [], wins: Array(mode === 4 ? 2 : mode).fill(0), touched: Date.now(), awayTimer: null,
   };
   rooms.set(r.code, r);
   return r;
@@ -111,7 +111,7 @@ function roomView(r, token) {
   const g = r.game;
   return {
     type: 'room',
-    code: r.code, mode: r.mode, level: r.level, isPublic: r.isPublic,
+    code: r.code, mode: r.mode, level: r.level, isPublic: r.isPublic, low: r.low,
     host: r.host === token, you, wins: r.wins,
     seats: r.seats.map(s => s ? { name: s.name, bot: !!s.bot, connected: s.bot || !!(clients.get(s.token) && clients.get(s.token).ws) } : null),
     game: g ? E.viewFor(g, you) : null,
@@ -127,7 +127,7 @@ function broadcast(r) {
 function startGame(r) {
   if (r.seats.some(s => !s)) return false;
   const prevDealer = r.game ? r.game.dealer : -1;
-  r.game = E.newGame(r.mode, { names: r.seats.map(s => s.name), bots: r.seats.map(s => !!s.bot), dealer: prevDealer + 1 });
+  r.game = E.newGame(r.mode, { names: r.seats.map(s => s.name), bots: r.seats.map(s => !!s.bot), dealer: prevDealer + 1, low: r.low });
   r.signals = [];
   broadcast(r); schedule(r);
   return true;
@@ -190,7 +190,7 @@ wss.on('connection', ws => {
         const mode = +m.mode;
         if (![2, 3, 4].includes(mode)) return err('Neispravan način igre.');
         leaveCurrent(token);
-        const nr = createRoom(mode, token, { level: m.level, isPublic: false });
+        const nr = createRoom(mode, token, { level: m.level, isPublic: false, low: !!m.low });
         joinRoom(nr, token);
         broadcast(nr); break;
       }
@@ -203,8 +203,8 @@ wss.on('connection', ws => {
       case 'quick': {
         const mode = +m.mode;
         if (![2, 3, 4].includes(mode)) return err('Neispravan način igre.');
-        let nr = [...rooms.values()].find(x => x.isPublic && x.mode === mode && !x.game && x.seats.includes(null) && seatOf(x, token) < 0);
-        if (!nr) { leaveCurrent(token); nr = createRoom(mode, token, { isPublic: true }); }
+        let nr = [...rooms.values()].find(x => x.isPublic && x.mode === mode && x.low === !!m.low && !x.game && x.seats.includes(null) && seatOf(x, token) < 0);
+        if (!nr) { leaveCurrent(token); nr = createRoom(mode, token, { isPublic: true, low: !!m.low }); }
         joinRoom(nr, token);
         if (!nr.seats.includes(null)) startGame(nr); else broadcast(nr);
         break;
@@ -221,6 +221,7 @@ wss.on('connection', ws => {
       }
       case 'addBot': if (r && r.host === token && !r.game) { addBot(r); broadcast(r); } break;
       case 'kick': if (r && r.host === token && !r.game) { const s = r.seats[+m.seat]; if (s && s.bot) { r.seats[+m.seat] = null; broadcast(r); } } break;
+      case 'variant': if (r && r.host === token && !r.isPublic && (!r.game || r.game.phase === 'over')) { r.low = !!m.low; r.game = null; r.wins = r.wins.map(() => 0); broadcast(r); } break;
       case 'level': if (r && r.host === token && ['easy', 'normal', 'hard'].includes(m.level)) { r.level = m.level; broadcast(r); } break;
       case 'start':
         if (!r || r.host !== token) return;

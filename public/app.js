@@ -2,7 +2,7 @@
 (function () {
   'use strict';
   const E = window.BriskulaEngine, B = window.BriskulaBot, Art = window.CardArt;
-  const T = window.TresetaEngine, TB = window.TresetaBot;
+  const T = window.TresetaEngine, TB = window.TresetaBot, AV = window.Avatars;
   const engOf = k => k === 'treseta' ? T : E;
   const botOf = k => k === 'treseta' ? TB : B;
   const $app = document.getElementById('app');
@@ -32,11 +32,28 @@
     kind: store.get('kind', store.get('low', false) ? 'meno' : 'briskula'),
     naManje: store.get('naManje', store.get('kind', null) === 'meno' || (store.get('kind', null) == null && store.get('low', false)) ? 1 : 0),
     target: store.get('target', 41), // trešeta: do koliko bodova
+    // profil: generički avatar 'eN' ili 'img' (vlastita slika), te "dužina pišulinca" u cm (0 = tajna)
+    avatar: store.get('avatar', 'e' + Math.floor(Math.random() * AV.N)),
+    avatarImg: store.get('avatarImg', ''),
+    cm: store.get('cm', 0),
   };
+  if (!/^e\d{1,2}$/.test(S.avatar) && !(S.avatar === 'img' && S.avatarImg)) S.avatar = 'e0';
+  S.cm = Math.max(0, Math.min(50, Math.round(+S.cm) || 0));
   if (!KIND_NAMES[S.kind]) S.kind = 'briskula'; // stari 'meno' = briškula na manje
   S.naManje = S.naManje ? 1 : 0;
   if (![21, 31, 41].includes(S.target)) S.target = 41;
   function save() { for (const k in S) store.set(k, S[k]); }
+
+  // ---------- avatari ----------
+  const CM_MAX = 50;
+  const imgCache = {}; // id -> data URL (slike igrača koje je poslao server)
+  const myAv = () => S.avatar === 'img' && S.avatarImg ? (imgCache.me = S.avatarImg, 'i:me') : S.avatar;
+  const profileMsg = () => Object.assign({ type: 'profile', name: S.name, cm: S.cm }, S.avatar === 'img' && S.avatarImg ? { av: 'img', img: S.avatarImg } : { av: S.avatar });
+  const cmText = cm => cm ? cm + ' cm' : 'tajna 🤫';
+  function avatar(seat, cls, extra) {
+    if (!seat) return `<span class="av ${cls || ''} empty"></span>`;
+    return `<span class="av ${cls || ''}">${AV.inner(seat.av, imgCache, seat.name)}${seat.cm ? `<span class="cmb" title="Dužina pišulinca">${seat.cm}<small>cm</small></span>` : ''}${extra || ''}</span>`;
+  }
 
   let room = null;       // trenutni prikaz sobe (lokalne ili online)
   let ctrl = null;       // kontroler: LocalGame ili Net
@@ -70,6 +87,7 @@
       this.E = engOf(this.kind); this.B = botOf(this.kind);
       const botNames = ['Jure', 'Mare', 'Ante', 'Luce', 'Frane', 'Tonka'].sort(() => Math.random() - .5);
       this.names = [name || 'Ti'].concat(botNames.slice(0, mode - 1).map(n => 'Bot ' + n));
+      this.avs = this.names.map((n, i) => i ? AV.forName(n) : null);
       this.wins = Array(mode === 4 ? 2 : mode).fill(0);
       this.signals = []; this.dealer = Math.floor(Math.random() * mode) - 1;
       this.start();
@@ -83,7 +101,7 @@
     view() {
       return {
         type: 'room', local: true, code: null, mode: this.mode, level: this.level, low: this.low, kind: this.kind, target: this.target, host: true, you: 0, wins: this.wins,
-        seats: this.names.map((n, i) => ({ name: n, bot: i > 0, connected: true })),
+        seats: this.names.map((n, i) => ({ name: n, bot: i > 0, connected: true, av: i ? this.avs[i] : myAv(), cm: i ? 0 : S.cm })),
         game: this.E.viewFor(this.st, 0), signals: this.signals.slice(-6),
       };
     }
@@ -124,14 +142,14 @@
       this.ws = ws;
       ws.onopen = () => {
         this.retry = 0; this.ok = true;
-        ws.send(JSON.stringify({ type: 'hello', token: this.token, name: S.name }));
+        ws.send(JSON.stringify(Object.assign(profileMsg(), { type: 'hello', token: this.token })));
         const q = this.q; this.q = []; q.forEach(m => ws.send(JSON.stringify(m)));
         render();
       };
       ws.onmessage = e => {
         const m = JSON.parse(e.data);
         if (m.type === 'welcome') { this.token = m.token; store.set('token', m.token); }
-        else if (m.type === 'room') { if (ctrl === this) onRoom(m); }
+        else if (m.type === 'room') { if (m.imgs) Object.assign(imgCache, m.imgs); if (ctrl === this) onRoom(m); }
         else if (m.type === 'left') { if (ctrl === this) { room = null; chat.open = false; render(); } }
         else if (m.type === 'error') toast(m.msg);
       };
@@ -231,7 +249,7 @@
     }
     chat.el.hidden = false;
     const msgs = room.chat || [];
-    const key = room.code + ':' + msgs.map(m => m.id).join(',') + ':' + room.you;
+    const key = room.code + ':' + msgs.map(m => m.id).join(',') + ':' + room.you + ':' + room.seats.map(s => s ? s.av : '').join(',');
     if (key === chat.key) return;
     chat.key = key;
     chat.el.querySelector('#chatRoom').textContent = 'soba ' + room.code;
@@ -241,7 +259,9 @@
       const mine = m.from === room.you;
       const time = new Date(m.t).toLocaleTimeString('hr-HR', { hour: '2-digit', minute: '2-digit' });
       const dot = room.mode === 4 ? `<span class="dot t${m.from % 2}"></span>` : '';
-      return `<div class="msg ${mine ? 'mine' : ''}"><div class="who">${dot}${mine ? 'Ti' : esc(m.name)} <span class="t">${time}</span></div><div class="txt">${esc(m.text)}</div></div>`;
+      const st = room.seats[m.from];
+      const av = st ? avatar(st, 'xs') : '';
+      return `<div class="msg ${mine ? 'mine' : ''}"><div class="who">${av}${dot}${mine ? 'Ti' : esc(m.name)} <span class="t">${time}</span></div><div class="txt">${esc(m.text)}</div></div>`;
     }).join('') : '<p class="muted chat-empty">Još nema poruka. Pozdravi ostale!</p>';
     if (atBottom || msgs.length && msgs[msgs.length - 1].from === room.you) list.scrollTop = list.scrollHeight;
   }
@@ -274,7 +294,21 @@
     const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) && !window.navigator.standalone;
     $app.innerHTML = `<div class="menu home">
       <div class="logo"><div class="fan">${fan}</div><h1>Briškula</h1></div>
-      <div class="panel"><h2 class="desk-only">Tvoje ime</h2><input id="name" maxlength="20" placeholder="Tvoje ime" value="${esc(S.name)}"></div>
+      <div class="panel profile">
+        <h2 class="desk-only">Igrač</h2>
+        <div class="prof-row">
+          <button class="av-pick" id="avBtn" aria-label="Odaberi avatar">${avatar({ av: myAv(), name: S.name }, 'lg')}<span class="pen">✎</span></button>
+          <input id="name" maxlength="20" placeholder="Tvoje ime" value="${esc(S.name)}">
+        </div>
+        <div class="cm-row">
+          <div class="cm-head"><span>Dužina pišulinca</span><b id="cmVal">${cmText(S.cm)}</b></div>
+          <div class="cm-ctl">
+            <button class="ghost small" data-cm="-1" aria-label="Manje">−</button>
+            <input type="range" id="cm" min="0" max="${CM_MAX}" step="1" value="${S.cm}" aria-label="Dužina pišulinca u cm">
+            <button class="ghost small" data-cm="1" aria-label="Više">+</button>
+          </div>
+        </div>
+      </div>
       <div class="panel">
         <h2>Vrsta igre</h2>
         ${seg('kind', KINDS, S.kind)}
@@ -306,16 +340,21 @@
     </div>`;
     const nameEl = $app.querySelector('#name');
     nameEl.oninput = () => { S.name = nameEl.value.trim(); save(); };
+    $app.querySelector('#avBtn').onclick = () => { modal = 'avatar'; render(); };
+    const cmEl = $app.querySelector('#cm'), cmVal = $app.querySelector('#cmVal');
+    const setCm = v => { S.cm = Math.max(0, Math.min(CM_MAX, v)); cmEl.value = S.cm; cmVal.textContent = cmText(S.cm); save(); };
+    cmEl.oninput = () => setCm(+cmEl.value);
+    $app.querySelectorAll('[data-cm]').forEach(b => b.onclick = () => setCm(S.cm + +b.dataset.cm));
     bindSegs();
     const needName = () => { if (!S.name) { S.name = 'Igrač' + Math.floor(Math.random() * 900 + 100); save(); } };
     $app.querySelector('#playBots').onclick = () => { needName(); ctrl = new LocalGame(+S.botMode, S.botLevel, S.name, S.kind, S.target, !!S.naManje); };
     if (!window.BRK_OFFLINE) {
-    $app.querySelector('#create').onclick = () => { needName(); ctrl = getNet(); ctrl.send({ type: 'setName', name: S.name }); ctrl.send({ type: 'create', mode: +S.onMode, level: 'normal', kind: S.kind, low: !!S.naManje, target: S.target }); };
-    $app.querySelector('#quick').onclick = () => { needName(); ctrl = getNet(); ctrl.send({ type: 'setName', name: S.name }); ctrl.send({ type: 'quick', mode: +S.onMode, kind: S.kind, low: !!S.naManje }); };
+    $app.querySelector('#create').onclick = () => { needName(); ctrl = getNet(); ctrl.send(profileMsg()); ctrl.send({ type: 'create', mode: +S.onMode, level: 'normal', kind: S.kind, low: !!S.naManje, target: S.target }); };
+    $app.querySelector('#quick').onclick = () => { needName(); ctrl = getNet(); ctrl.send(profileMsg()); ctrl.send({ type: 'quick', mode: +S.onMode, kind: S.kind, low: !!S.naManje }); };
     const join = () => {
       const c = $app.querySelector('#code').value.trim().toUpperCase();
       if (c.length < 4) return toast('Upiši kod sobe');
-      needName(); ctrl = getNet(); ctrl.send({ type: 'setName', name: S.name }); ctrl.send({ type: 'join', code: c });
+      needName(); ctrl = getNet(); ctrl.send(profileMsg()); ctrl.send({ type: 'join', code: c });
     };
     $app.querySelector('#join').onclick = join;
     $app.querySelector('#code').onkeydown = e => { if (e.key === 'Enter') join(); };
@@ -352,8 +391,9 @@
       <div class="panel">
         <h2>Igrači</h2>
         <ul class="seats">${r.seats.map((s, i) => `<li>
+          ${avatar(s, 'md')}
+          <span class="n">${s ? esc(s.name) + (i === r.you ? ' (ti)' : '') : '<span class="muted">čeka se igrač…</span>'}${s && s.cm ? `<span class="cmt">Dužina pišulinca: ${s.cm} cm</span>` : ''}</span>
           ${r.mode === 4 ? `<span class="tag team${i % 2}">${i % 2 ? 'Par B' : 'Par A'}</span>` : ''}
-          <span class="n">${s ? esc(s.name) + (i === r.you ? ' (ti)' : '') : '<span class="muted">čeka se igrač…</span>'}</span>
           ${s && s.bot ? '<span class="tag">bot</span>' : ''}
           ${s && !s.bot && !s.connected ? '<span class="tag">odspojen</span>' : ''}
           ${(!s || s.bot) && i !== r.you ? `<button class="ghost small" data-seat="${i}">Sjedni ovdje</button>` : ''}
@@ -433,7 +473,7 @@
     }
     for (const m of r.chat || []) {
       const t = seenSignals.get(chatKey(r, m)) || 0;
-      if (m.from !== me && now - t < 4000 && !(bubbles[m.from] && (seenSignals.get(bubbles[m.from].id) || 0) > t)) bubbles[m.from] = { text: m.text.length > 40 ? m.text.slice(0, 40) + '…' : m.text, team: null, chat: true };
+      if (now - t < 4000 && !(bubbles[m.from] && (seenSignals.get(bubbles[m.from].id) || 0) > t)) bubbles[m.from] = { text: m.text.length > 40 ? m.text.slice(0, 40) + '…' : m.text, team: null, chat: true };
     }
     // trešeta: akuže se vide tijekom prvog štiha
     if (tre && g.trickNo <= 1 && g.phase === 'play' && g.akuze && g.akuze.length) {
@@ -449,8 +489,10 @@
       const seat = r.seats[p];
       const off = seat && !seat.bot && !seat.connected;
       const pts = S.showPoints ? `<span class="pts">${ptsText(g, pl.points)}</span>` : `<span class="muted">${pl.wonCount}</span>`;
-      return `<div class="nameplate ${g.phase === 'play' && g.turn === p ? 'turn' : ''}">
-        ${g.mode === 4 ? `<span class="dot t${p % 2}"></span>` : ''}${esc(pl.name)}${off ? ' <span class="off">⚠</span>' : ''} ${pts}</div>`;
+      const turn = g.phase === 'play' && g.turn === p;
+      // avatar s oblačićem poruke iznad njega, pa pločica s imenom i bodovima
+      return `<div class="pl pl-${p === me ? 'me' : posOf(p, g)}">${avatar(seat || { name: pl.name }, turn ? 'turn' : '', bubble(p))}<div class="nameplate ${turn ? 'turn' : ''}">
+        ${g.mode === 4 ? `<span class="dot t${p % 2}"></span>` : ''}${esc(pl.name)}${off ? ' <span class="off">⚠</span>' : ''} ${pts}</div></div>`;
     };
     const bubble = p => bubbles[p] ? `<div class="bubble ${bubbles[p].team != null ? 'team' : ''} ${bubbles[p].chat ? 'chatb' : ''} ${bubbles[p].akuza ? 'akuza' : ''}">${esc(bubbles[p].text)}</div>` : '';
 
@@ -475,7 +517,7 @@
         </div>`;
       }
       else cards = `<div class="backs">${Array.from({ length: n }, () => `<div class="card sm">${Art.back()}</div>`).join('')}</div>`;
-      seats += `<div class="seat ${pos}">${pos === 'top' ? cards + plate(p) : plate(p) + cards}${bubble(p)}</div>`;
+      seats += `<div class="seat ${pos}">${pos === 'top' ? cards + plate(p) : plate(p) + cards}</div>`;
     }
 
     // špil + briškula (u trešeti nema briškule; u dvoje se vuče iz špila)
@@ -556,9 +598,9 @@
         <div class="trick" id="trick">${trickHtml}</div>
         <div class="status">${status}</div>
       </div>
-      <div class="me ${tre ? 'tre' : ''}">${bubble(me)}
+      <div class="me ${tre ? 'tre' : ''}">
         <div class="hand ${myTurn ? 'myturn' : ''} ${many ? 'many' : ''}" style="--n:${hand.length}">${handHtml}</div>
-        <div>${plate(me)}</div>
+        <div class="mypl">${plate(me)}</div>
         ${sigs}
       </div>`;
 
@@ -600,6 +642,15 @@
       <label class="chk"><input type="checkbox" id="sp" ${S.showPoints ? 'checked' : ''}> Prikaži bodove tijekom igre</label>
       <label class="chk"><input type="checkbox" id="snd" ${S.sound ? 'checked' : ''}> Zvukovi</label>
       <div class="row" style="margin-top:12px"><button class="ghost" id="rulesB">Pravila</button><button id="close">Zatvori</button></div>`;
+    else if (modal === 'avatar') {
+      const tiles = Array.from({ length: AV.N }, (_, i) => `<button class="av-opt ${S.avatar === 'e' + i ? 'on' : ''}" data-av="e${i}" aria-label="Avatar ${i + 1}">${AV.face(i)}</button>`);
+      if (S.avatarImg) tiles.unshift(`<button class="av-opt ${S.avatar === 'img' ? 'on' : ''}" data-av="img" aria-label="Moja slika"><img src="${esc(S.avatarImg)}" alt=""></button>`);
+      html = `<h2>Odaberi avatar</h2>
+        <div class="av-grid">${tiles.join('')}</div>
+        <label class="upload ghost"><input type="file" id="avFile" accept="image/*" hidden>📷 ${S.avatarImg ? 'Učitaj drugu sliku' : 'Učitaj svoju sliku'}</label>
+        <p class="muted" style="text-align:center;margin:8px 0 12px">Slika se izreže na kvadrat i smanji, pa je vide i ostali igrači u online igri.</p>
+        <div class="row">${S.avatarImg ? '<button class="ghost" id="avDel">Ukloni sliku</button>' : ''}<button id="close">Gotovo</button></div>`;
+    }
     else if (modal === 'last' && g && g.lastTrick) html = `<h2>Zadnji štih</h2>
       <div class="lasttrick">${g.lastTrick.cards.map(t => `<div style="text-align:center"><div class="card">${Art.face(t.card)}</div><div class="muted">${esc(g.players[t.p].name)}</div></div>`).join('')}</div>
       <p style="text-align:center">Nosi: <b>${esc(g.players[g.lastTrick.winner].name)}</b> (+${ptsText(g, g.lastTrick.points)})${g.lastTrick.last ? ' · zadnji štih' : ''}</p>
@@ -613,6 +664,17 @@
     const sp = el.querySelector('#sp'); if (sp) sp.onchange = () => { S.showPoints = sp.checked; save(); render(); };
     const snd = el.querySelector('#snd'); if (snd) snd.onchange = () => { S.sound = snd.checked; save(); };
     const rb = el.querySelector('#rulesB'); if (rb) rb.onclick = () => { modal = 'rules'; render(); };
+    el.querySelectorAll('[data-av]').forEach(b => b.onclick = () => { S.avatar = b.dataset.av; save(); render(); });
+    const avFile = el.querySelector('#avFile');
+    if (avFile) avFile.onchange = async () => {
+      const f = avFile.files && avFile.files[0];
+      if (!f) return;
+      try { S.avatarImg = await AV.fromFile(f); S.avatar = 'img'; save(); toast('Slika postavljena'); }
+      catch (e) { toast(e && e.message || 'Slika se ne može učitati.'); }
+      render();
+    };
+    const avDel = el.querySelector('#avDel');
+    if (avDel) avDel.onclick = () => { S.avatarImg = ''; if (S.avatar === 'img') S.avatar = 'e0'; save(); render(); };
     const nx = el.querySelector('#nextHand'); if (nx) nx.onclick = () => ctrl.next();
     const again = el.querySelector('#again'); if (again) again.onclick = () => { ctrl.rematch(); };
     const lobby = el.querySelector('#lobby'); if (lobby) lobby.onclick = () => ctrl.send({ type: 'toLobby' });
@@ -729,7 +791,7 @@
   if (window.BRK_OFFLINE) { /* samo botovi */ }
   else if (joinCode) {
     if (!S.name) { S.name = 'Igrač' + Math.floor(Math.random() * 900 + 100); save(); }
-    ctrl = getNet(); ctrl.send({ type: 'setName', name: S.name }); ctrl.send({ type: 'join', code: joinCode.toUpperCase() });
+    ctrl = getNet(); ctrl.send(profileMsg()); ctrl.send({ type: 'join', code: joinCode.toUpperCase() });
   } else if (store.get('token', null)) {
     // ponovno spajanje u igru koja je u tijeku (npr. nakon osvježavanja)
     ctrl = getNet();

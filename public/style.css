@@ -26,7 +26,16 @@ h2 { font-size: 17px; margin: 0 0 10px; color: var(--gold); }
 .muted { opacity: .7; font-size: 14px; }
 
 /* ---------- izbornik ---------- */
-.menu { max-width: 480px; width: 100%; margin: 0 auto; padding: 14px 16px 30px; overflow-y: auto; flex: 1; }
+.menu {
+  /* cijela širina je područje za pomicanje (traka uz rub prozora, ne uz panele),
+     a sadržaj je centriran u stupcu od 480 px */
+  width: 100%; padding: 14px max(16px, calc((100% - 480px) / 2)) 30px;
+  overflow-y: auto; flex: 1; min-height: 0;
+  scrollbar-width: thin; scrollbar-color: rgba(229,199,122,.35) transparent;
+}
+.menu::-webkit-scrollbar { width: 8px; }
+.menu::-webkit-scrollbar-track { background: transparent; }
+.menu::-webkit-scrollbar-thumb { background: rgba(229,199,122,.35); border-radius: 8px; }
 .logo { text-align: center; margin-bottom: 14px; }
 .logo .fan { display: flex; justify-content: center; height: 92px; margin-top: 6px; }
 .logo .fan > div { width: 58px; margin: 0 -10px; transform-origin: 50% 110%; filter: drop-shadow(0 3px 4px rgba(0,0,0,.35)); }
@@ -37,6 +46,7 @@ h2 { font-size: 17px; margin: 0 0 10px; color: var(--gold); }
 .seg button { flex: 1; background: transparent; color: var(--cream); padding: 9px 4px; font-weight: 600; font-size: 14px; border-radius: 9px; }
 .seg button.on { background: var(--gold); color: #3a2a08; }
 .stack > * + * { margin-top: 8px; }
+.desk-only { display: none; }
 .links { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
 label.chk { display: flex; align-items: center; gap: 10px; padding: 6px 0; }
 label.chk input { width: 20px; height: 20px; }
@@ -151,6 +161,14 @@ label.chk input { width: 20px; height: 20px; }
 
 /* ---------- veliki ekran (desktop) ---------- */
 @media (min-width: 900px) and (min-height: 520px) {
+  /* početni izbornik u dva stupca da stane na ekran bez pomicanja */
+  .menu.home { padding-left: max(24px, calc((100% - 940px) / 2)); padding-right: max(24px, calc((100% - 940px) / 2));
+    display: grid; grid-template-columns: 1fr 1fr; column-gap: 20px; align-content: safe center; }
+  .menu.home > .logo, .menu.home > .links, .menu.home > p { grid-column: 1 / -1; }
+  .menu.home .logo { display: flex; align-items: center; justify-content: center; gap: 24px; margin-bottom: 16px; }
+  .menu.home .logo .fan { margin: 0 28px 0 0; }
+  .menu.home .desk-only { display: block; }
+  .menu.home .logo h1 { margin: 0; }
   :root { --cw: min(11.5vw, calc((100vh - 100px) / 5.2), 175px); --sw: calc(var(--cw) * .56); }
   .topbar, .table, .me { width: 100%; max-width: 1280px; margin-left: auto; margin-right: auto; }
   .topbar { font-size: 16px; padding: 8px 16px; }

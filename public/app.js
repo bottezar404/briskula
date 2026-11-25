@@ -46,7 +46,7 @@
       o.connect(g); g.connect(actx.destination); o.start(); o.stop(actx.currentTime + d);
     } catch { }
   }
-  const sfx = { play: () => beep(420, .08), win: () => { beep(660, .12); setTimeout(() => beep(880, .18), 110); }, turn: () => beep(520, .1, 'sine') };
+  const sfx = { play: () => beep(420, .08), win: () => { beep(660, .12); setTimeout(() => beep(880, .18), 110); }, turn: () => beep(520, .1, 'sine'), chat: () => { beep(740, .06, 'sine'); setTimeout(() => beep(990, .08, 'sine'), 70); } };
 
   // ---------- lokalna igra protiv botova ----------
   class LocalGame {
@@ -115,7 +115,7 @@
         const m = JSON.parse(e.data);
         if (m.type === 'welcome') { this.token = m.token; store.set('token', m.token); }
         else if (m.type === 'room') { if (ctrl === this) onRoom(m); }
-        else if (m.type === 'left') { if (ctrl === this) { room = null; render(); } }
+        else if (m.type === 'left') { if (ctrl === this) { room = null; chat.open = false; render(); } }
         else if (m.type === 'error') toast(m.msg);
       };
       ws.onclose = () => { this.ok = false; if (ctrl === this && room) render(); this.later(); };
@@ -124,6 +124,7 @@
     send(m) { if (this.ws && this.ws.readyState === 1) this.ws.send(JSON.stringify(m)); else this.q.push(m); }
     play(c) { this.send({ type: 'play', card: c }); }
     signal(text, team) { this.send({ type: 'signal', text, team }); }
+    chat(text) { this.send({ type: 'chat', text }); }
     rematch() { this.send({ type: 'start' }); }
     leave() { this.send({ type: 'leave' }); }
   }
@@ -142,7 +143,89 @@
       if (g.phase === 'over' && og.phase !== 'over') setTimeout(() => sfx.win(), 200);
     }
     for (const s of r.signals || []) if (!seenSignals.has(s.id)) seenSignals.set(s.id, Date.now());
+    chatUpdate(r, old);
     render();
+  }
+
+  // ---------- chat (samo online sobe) ----------
+  const CHAT_MAX = 200;
+  const chat = { open: false, read: {}, el: null, key: '' };
+  const chatKey = (r, m) => 'c:' + r.code + ':' + m.id;
+  function chatUnread(r) {
+    if (!r || !r.chat) return 0;
+    const last = chat.read[r.code] || 0;
+    return r.chat.filter(m => m.id > last && m.from !== r.you).length;
+  }
+  function chatUpdate(r, old) {
+    const msgs = r.chat || [];
+    const sameRoom = old && old.code === r.code;
+    const fresh = msgs.filter(m => !seenSignals.has(chatKey(r, m)));
+    // poruke koje su već bile kad smo ušli u sobu ne iskaču kao mjehurići
+    for (const m of msgs) if (!seenSignals.has(chatKey(r, m))) seenSignals.set(chatKey(r, m), sameRoom ? Date.now() : 0);
+    if (!(r.code in chat.read)) chat.read[r.code] = sameRoom ? 0 : msgs.reduce((a, m) => Math.max(a, m.id), 0);
+    if (chat.open) chat.read[r.code] = msgs.reduce((a, m) => Math.max(a, m.id), chat.read[r.code]);
+    if (sameRoom && fresh.some(m => m.from !== r.you)) {
+      if (!chat.open) {
+        sfx.chat();
+        const m = fresh.filter(x => x.from !== r.you).pop();
+        if (!r.game) toast(m.name + ': ' + (m.text.length > 60 ? m.text.slice(0, 60) + '…' : m.text));
+      }
+    }
+  }
+  function chatBtn() {
+    if (!room || room.local || !room.code) return '';
+    const n = chatUnread(room);
+    return `<button class="ghost small chat-btn ${chat.open ? 'on' : ''}" id="chatBtn" aria-label="Chat">💬${n ? `<span class="badge">${n > 9 ? '9+' : n}</span>` : ''}</button>`;
+  }
+  function bindChatBtn() {
+    const b = $app.querySelector('#chatBtn');
+    if (b) b.onclick = () => setChat(!chat.open);
+  }
+  function setChat(open) {
+    chat.open = open;
+    if (open && room) chat.read[room.code] = (room.chat || []).reduce((a, m) => Math.max(a, m.id), 0);
+    render();
+    if (open && chat.el && window.matchMedia('(min-width: 900px)').matches) chat.el.querySelector('input').focus();
+  }
+  function renderChat() {
+    const show = chat.open && room && !room.local && room.code;
+    document.body.classList.toggle('chat-open', !!show);
+    if (!show) { if (chat.el) chat.el.hidden = true; return; }
+    if (!chat.el) {
+      const el = chat.el = document.createElement('div');
+      el.id = 'chat'; el.className = 'chat';
+      el.innerHTML = `<div class="chat-head"><b>Chat</b><span class="muted" id="chatRoom"></span><button class="ghost small" id="chatClose" aria-label="Zatvori">✕</button></div>
+        <div class="chat-list" id="chatList"></div>
+        <form class="chat-form" id="chatForm" autocomplete="off">
+          <input id="chatIn" maxlength="${CHAT_MAX}" placeholder="Napiši poruku…" enterkeyhint="send">
+          <button type="submit">Pošalji</button>
+        </form>`;
+      document.body.appendChild(el);
+      el.querySelector('#chatClose').onclick = () => setChat(false);
+      el.querySelector('#chatForm').onsubmit = e => {
+        e.preventDefault();
+        const inp = el.querySelector('#chatIn');
+        const t = inp.value.replace(/\s+/g, ' ').trim().slice(0, CHAT_MAX);
+        if (!t || !ctrl || !ctrl.chat) return;
+        ctrl.chat(t); inp.value = '';
+      };
+      chat.key = '';
+    }
+    chat.el.hidden = false;
+    const msgs = room.chat || [];
+    const key = room.code + ':' + msgs.map(m => m.id).join(',') + ':' + room.you;
+    if (key === chat.key) return;
+    chat.key = key;
+    chat.el.querySelector('#chatRoom').textContent = 'soba ' + room.code;
+    const list = chat.el.querySelector('#chatList');
+    const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 40;
+    list.innerHTML = msgs.length ? msgs.map(m => {
+      const mine = m.from === room.you;
+      const time = new Date(m.t).toLocaleTimeString('hr-HR', { hour: '2-digit', minute: '2-digit' });
+      const dot = room.mode === 4 ? `<span class="dot t${m.from % 2}"></span>` : '';
+      return `<div class="msg ${mine ? 'mine' : ''}"><div class="who">${dot}${mine ? 'Ti' : esc(m.name)} <span class="t">${time}</span></div><div class="txt">${esc(m.text)}</div></div>`;
+    }).join('') : '<p class="muted chat-empty">Još nema poruka. Pozdravi ostale!</p>';
+    if (atBottom || msgs.length && msgs[msgs.length - 1].from === room.you) list.scrollTop = list.scrollHeight;
   }
 
   // ---------- prikaz ----------
@@ -151,6 +234,7 @@
     else if (!room.game) renderLobby();
     else renderGame();
     renderModal();
+    renderChat();
   }
 
   function seg(name, opts, val) {
@@ -228,7 +312,7 @@
     const full = r.seats.every(Boolean);
     const conn = net && net.ok;
     $app.innerHTML = `<div class="menu">
-      <div class="topbar"><button class="ghost small" id="leave">← Izlaz</button><div class="mid">${MODE_NAMES[r.mode]}${r.low ? ' · ' + LOW_NAME : ''}${r.isPublic ? ' · javna igra' : ''}</div></div>
+      <div class="topbar"><button class="ghost small" id="leave">← Izlaz</button><div class="mid">${MODE_NAMES[r.mode]}${r.low ? ' · ' + LOW_NAME : ''}${r.isPublic ? ' · javna igra' : ''}</div>${chatBtn()}</div>
       <div class="panel" style="text-align:center">
         <div class="muted">Kod sobe</div>
         <div class="code">${esc(r.code)}</div>
@@ -258,6 +342,7 @@
       </div>
     </div>`;
     $app.querySelector('#leave').onclick = leave;
+    bindChatBtn();
     const sh = $app.querySelector('#share');
     if (sh) sh.onclick = async () => {
       const url = link();
@@ -276,7 +361,7 @@
 
   function leave() {
     if (ctrl) ctrl.leave();
-    ctrl = null; room = null; modal = null;
+    ctrl = null; room = null; modal = null; chat.open = false;
     if (location.search) history.replaceState(null, '', location.pathname);
     render();
   }
@@ -305,6 +390,10 @@
       const t = seenSignals.get(s.id) || 0;
       if (now - t < 4000 && s.from >= 0) bubbles[s.from] = s;
     }
+    for (const m of r.chat || []) {
+      const t = seenSignals.get(chatKey(r, m)) || 0;
+      if (m.from !== me && now - t < 4000 && !(bubbles[m.from] && (seenSignals.get(bubbles[m.from].id) || 0) > t)) bubbles[m.from] = { text: m.text.length > 40 ? m.text.slice(0, 40) + '…' : m.text, team: null, chat: true };
+    }
     const sysMsg = (r.signals || []).filter(s => s.from < 0 && now - (seenSignals.get(s.id) || 0) < 5000).pop();
 
     const plate = (p) => {
@@ -315,7 +404,7 @@
       return `<div class="nameplate ${g.phase === 'play' && g.turn === p ? 'turn' : ''}">
         ${g.mode === 4 ? `<span class="dot t${p % 2}"></span>` : ''}${esc(pl.name)}${off ? ' <span class="off">⚠</span>' : ''} ${pts}</div>`;
     };
-    const bubble = p => bubbles[p] ? `<div class="bubble ${bubbles[p].team != null ? 'team' : ''}">${esc(bubbles[p].text)}</div>` : '';
+    const bubble = p => bubbles[p] ? `<div class="bubble ${bubbles[p].team != null ? 'team' : ''} ${bubbles[p].chat ? 'chatb' : ''}">${esc(bubbles[p].text)}</div>` : '';
 
     let seats = '';
     for (let p = 0; p < g.mode; p++) {
@@ -378,6 +467,7 @@
         <button class="ghost small" id="leave">←</button>
         <div class="mid">${MODE_NAMES[g.mode]}${g.low ? ' · ' + LOW_NAME : ''}${r.code ? ' · ' + esc(r.code) : ' · ' + LEVEL_NAMES[r.level]}${tally}</div>
         <button class="ghost small" id="last" ${g.lastTrick ? '' : 'disabled'}>Zadnji štih</button>
+        ${chatBtn()}
         <button class="ghost small" id="menuBtn">⚙</button>
       </div>
       <div class="table mode${g.mode} ${g.mode >= 3 ? 'has-left' : ''}">
@@ -394,6 +484,7 @@
     $app.querySelector('#leave').onclick = () => { if (g.phase === 'over' || confirmLeave()) leave(); };
     $app.querySelector('#last').onclick = () => { modal = 'last'; render(); };
     $app.querySelector('#menuBtn').onclick = () => { modal = 'settings'; render(); };
+    bindChatBtn();
     $app.querySelectorAll('.hand .card.playable').forEach(el => el.onclick = () => {
       el.style.transform = 'translateY(-30px)';
       ctrl.play(el.dataset.card);

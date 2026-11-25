@@ -228,3 +228,42 @@ label.chk input { width: 20px; height: 20px; }
   .nameplate { font-size: 15px; padding: 4px 10px; }
   .me { gap: 4px; padding-bottom: 6px; }
 }
+
+/* ---------- chat ---------- */
+.chat-btn { position: relative; }
+.chat-btn.on { background: rgba(229,199,122,.35); }
+.chat-btn .badge { position: absolute; top: -5px; right: -5px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--red); color: #fff; font-size: 11px; font-weight: 800; line-height: 18px; text-align: center; box-shadow: 0 0 0 2px var(--felt2); }
+.chat { position: fixed; z-index: 40; display: flex; flex-direction: column; background: #173f2a; border: 1px solid rgba(229,199,122,.4); box-shadow: 0 -6px 30px rgba(0,0,0,.45);
+  /* mobitel: ploča odozdo preko ruke, iznad tipkovnice */
+  left: 0; right: 0; bottom: 0; height: min(58vh, 440px); height: min(58dvh, 440px); border-radius: 18px 18px 0 0; border-bottom: 0;
+  padding: 10px 10px calc(10px + env(safe-area-inset-bottom)); animation: chat-up .2s ease-out; }
+.chat[hidden] { display: none; }
+@keyframes chat-up { from { transform: translateY(30px); opacity: 0; } }
+.chat-head { display: flex; align-items: center; gap: 8px; padding: 0 2px 8px; border-bottom: 1px solid rgba(255,255,255,.1); }
+.chat-head b { color: var(--gold); font-size: 17px; }
+.chat-head .muted { flex: 1; font-size: 13px; }
+.chat-list { flex: 1; min-height: 0; overflow-y: auto; padding: 10px 2px; display: flex; flex-direction: column; gap: 8px; user-select: text; -webkit-user-select: text; overscroll-behavior: contain;
+  scrollbar-width: thin; scrollbar-color: rgba(229,199,122,.35) transparent; }
+.chat-list::-webkit-scrollbar { width: 6px; }
+.chat-list::-webkit-scrollbar-thumb { background: rgba(229,199,122,.35); border-radius: 6px; }
+.chat-empty { text-align: center; margin: auto 0; }
+.msg { max-width: 85%; align-self: flex-start; }
+.msg .who { font-size: 12px; font-weight: 700; color: var(--gold); margin: 0 0 2px 4px; display: flex; align-items: center; gap: 5px; }
+.msg .who .t { color: var(--cream); opacity: .55; font-weight: 500; }
+.msg .txt { background: rgba(0,0,0,.3); padding: 8px 11px; border-radius: 4px 14px 14px 14px; font-size: 15px; line-height: 1.35; overflow-wrap: anywhere; white-space: pre-wrap; }
+.msg.mine { align-self: flex-end; }
+.msg.mine .who { justify-content: flex-end; margin: 0 4px 2px 0; }
+.msg.mine .txt { background: var(--gold); color: #3a2a08; border-radius: 14px 4px 14px 14px; }
+.chat-form { display: flex; gap: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,.1); }
+.chat-form input { flex: 1; min-width: 0; font-size: 16px; /* 16px: iPhone ne zumira */ user-select: text; -webkit-user-select: text; }
+.chat-form button { flex: 0 0 auto; padding: 10px 14px; }
+.bubble.chatb { max-width: min(60vw, 260px); overflow: hidden; text-overflow: ellipsis; }
+.seat.right .bubble.chatb { right: 0; }
+.seat.left .bubble.chatb { left: 0; }
+@media (prefers-color-scheme: dark) { .chat { background: #102e1f; } .msg .txt { background: rgba(0,0,0,.45); } }
+/* PC: chat kao stupac s desne strane, stol se suzi da ništa ne prekrije */
+@media (min-width: 900px) and (min-height: 520px) {
+  .chat { left: auto; top: 10px; right: 10px; bottom: 10px; width: 340px; height: auto; border-radius: 16px; border-bottom: 1px solid rgba(229,199,122,.4); padding: 12px; animation: fade .2s; }
+  body.chat-open #app { padding-right: 360px; }
+  body.chat-open #toast { left: calc(50% - 180px); }
+}

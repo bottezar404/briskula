@@ -65,6 +65,10 @@ datoteka briše kod svakog restarta i nove verzije.
 Besplatna baza, npr. [Neon](https://neon.tech): napravi projekt, kopiraj „Connection string”
 (`postgresql://…?sslmode=require`) i na Renderu ga dodaj u *Environment* kao `DATABASE_URL`.
 
+Može i [Supabase](https://supabase.com): *Connect* → **Session pooler** (ne „Direct connection”, jer ona radi samo
+preko IPv6, a Render ga ne podržava), zamijeni `[YOUR-PASSWORD]` lozinkom baze i to stavi u `DATABASE_URL`.
+Besplatni Supabase projekt se pauzira nakon tjedan dana bez korištenja (ponovno se pokrene u Supabase nadzornoj ploči).
+
 ## Objava
 
 Treba bilo koji hosting koji vrti Node i podržava WebSocket (npr. Render, Railway, Fly.io).

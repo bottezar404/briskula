@@ -22,9 +22,13 @@ function open(opts) {
 
   if (url) {
     const { Pool } = require('pg');
-    // lokalna baza bez SSL-a, hostane (Neon, Supabase, Render…) uvijek preko SSL-a
+    // lokalna baza bez SSL-a, hostane (Neon, Supabase, Render…) uvijek preko SSL-a.
+    // Supabase potpisuje certifikat svojim CA-om koji Node ne poznaje, pa se tamo veza šifrira bez provjere certifikata.
+    // (sslmode iz linka se makne jer bi inače on odlučivao o provjeri)
     const local = /@(localhost|127\.0\.0\.1)[:/]/.test(url) || /sslmode=disable/.test(url);
-    const pool = new Pool({ connectionString: url, max: 3, ssl: local ? false : true });
+    const supa = /supabase\.(co|com)\b/.test(url);
+    const conn = url.replace(/([?&])sslmode=[^&]*&?/, '$1').replace(/[?&]$/, '');
+    const pool = new Pool({ connectionString: conn, max: 3, ssl: local ? false : { rejectUnauthorized: !supa } });
     pool.on('error', e => console.error('baza:', e.message));
     backend = {
       kind: 'postgres',

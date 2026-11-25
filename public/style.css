@@ -521,3 +521,16 @@ label.upload:active { transform: scale(.98); }
   .me.poker .mypl { align-items: flex-end; }
   .me.poker .pctl { width: 380px; }
 }
+
+/* ---------- turnir ---------- */
+.tour { margin: 4px 0 12px; padding: 8px 10px 2px; border-radius: 12px; background: rgba(0,0,0,.22); border: 1px solid rgba(229,199,122,.3); }
+.tour-h { text-align: center; font-weight: 700; color: var(--gold); font-size: 14px; margin-bottom: 4px; }
+.ttable { margin-bottom: 6px; }
+.ttable td.tot, .ttable td:last-child { color: var(--gold); font-size: 16px; }
+.ttable tr.win td:first-child { color: var(--gold); }
+.tour-win { text-align: center; font-weight: 800; font-size: 18px; color: var(--gold); margin: 0 0 12px; }
+@media (max-width: 899px) {
+  /* povišenje na mobitelu: ploča iznad mojih karata, da stol ne postane prenizak */
+  .me.poker .praise { position: absolute; left: 8px; right: 8px; width: auto; max-width: none; bottom: calc(100% + 6px); z-index: 12;
+    background: rgba(12,40,26,.96); border: 1px solid rgba(229,199,122,.4); box-shadow: 0 6px 24px rgba(0,0,0,.5); }
+}

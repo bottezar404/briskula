@@ -160,9 +160,9 @@
   function renderMenu() {
     const fan = ['kupe-1', 'spade-13', 'dinari-3', 'bate-12'].map((c, i) => `<div style="transform: rotate(${(i - 1.5) * 12}deg) translateY(${Math.abs(i - 1.5) * 6}px)">${Art.face(c)}</div>`).join('');
     const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) && !window.navigator.standalone;
-    $app.innerHTML = `<div class="menu">
+    $app.innerHTML = `<div class="menu home">
       <div class="logo"><div class="fan">${fan}</div><h1>Briškula</h1></div>
-      <div class="panel"><input id="name" maxlength="20" placeholder="Tvoje ime" value="${esc(S.name)}"></div>
+      <div class="panel"><h2 class="desk-only">Tvoje ime</h2><input id="name" maxlength="20" placeholder="Tvoje ime" value="${esc(S.name)}"></div>
       <div class="panel">
         <h2>Vrsta igre</h2>
         ${seg('low', [[0, 'Briškula'], [1, LOW_NAME]], S.low ? 1 : 0)}

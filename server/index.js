@@ -47,7 +47,16 @@ const CHAT_LEN = 200, CHAT_KEEP = 50, CHAT_GAP = 700;
 const TURN_TIMES = [0, 15, 30, 60], TURN_DEFAULT = 30, TURN_GRACE = 1500;
 const TURN_SCALE = +process.env.BRK_TURN_SCALE || 1; // samo za testove
 const turnTimeOf = v => TURN_TIMES.includes(+v) ? +v : TURN_DEFAULT;
-const HAND_PAUSE = 9000, TRICK_PAUSE = 1400, BOT_DELAY = 750, AWAY_AUTOPLAY = 25000, ROOM_TTL = 30 * 60 * 1000;
+// trešeta ima puno više štihova i ruku od briškule (2 igrača do 41 ≈ 130 štihova),
+// pa su pauze kraće da partija ne traje predugo
+const PACE = {
+  briskula: { trick: 1400, bot: 750, botRnd: 400 },
+  treseta: { trick: 1050, bot: 450, botRnd: 300 },
+};
+const PACE_SCALE = +process.env.BRK_PACE_SCALE || 1; // samo za testove
+for (const k in PACE) for (const f in PACE[k]) PACE[k][f] *= PACE_SCALE;
+const pace = r => PACE[r.kind === 'treseta' ? 'treseta' : 'briskula'];
+const HAND_PAUSE = 9000, AWAY_AUTOPLAY = 25000, ROOM_TTL = 30 * 60 * 1000;
 
 function code() {
   const A = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -179,6 +188,7 @@ function roomView(r, token) {
     game: g ? engOf(r).viewFor(g, you) : null,
     signals: r.signals.filter(s => s.team == null || (you >= 0 && s.team === E.teamOf(r.mode, you))).slice(-6),
     chat: r.chat.slice(-30),
+    ready: g && g.phase === 'hand' && r.ready ? [...r.ready] : [],
   };
 }
 
@@ -193,7 +203,7 @@ function startGame(r) {
   const prevDealer = r.game ? r.game.dealer : -1;
   const o = { names: r.seats.map(s => s.name), bots: r.seats.map(s => !!s.bot), dealer: prevDealer + 1 };
   r.game = r.kind === 'treseta' ? T.newGame(r.mode, Object.assign(o, { target: r.target, low: r.low })) : E.newGame(r.mode, Object.assign(o, { low: r.low }));
-  r.signals = [];
+  r.signals = []; r.ready = new Set();
   broadcast(r); schedule(r);
   return true;
 }
@@ -249,14 +259,14 @@ function schedule(r) {
         if (!res.draw) r.wins[E.teamOf(r.mode, res.winners[0])]++;
       }
       broadcast(r); schedule(r);
-    }, TRICK_PAUSE);
+    }, pace(r).trick);
   } else if (g.phase === 'hand') {
     // kraj ruke u trešeti: kratka pauza za pregled bodova, pa nova ruka
     r.timer = setTimeout(() => nextHand(r), HAND_PAUSE);
   } else if (g.phase === 'play') {
     const s = r.seats[g.turn];
     const c = s && !s.bot ? clients.get(s.token) : null;
-    if (s.bot) r.timer = setTimeout(() => botMove(r), BOT_DELAY + Math.random() * 400);
+    if (s.bot) r.timer = setTimeout(() => botMove(r), pace(r).bot + Math.random() * pace(r).botRnd);
     // odspojeni igrač: ako nema timera za potez, bot nakon nekog vremena igra umjesto njega
     else if ((!c || !c.ws) && !r.turnTimer) r.awayTimer = setTimeout(() => botMove(r), AWAY_AUTOPLAY);
   }
@@ -265,7 +275,7 @@ function schedule(r) {
 function nextHand(r) {
   const g = r.game;
   if (!g || g.phase !== 'hand') return;
-  T.nextHand(g); r.signals = [];
+  T.nextHand(g); r.signals = []; r.ready = new Set();
   broadcast(r); schedule(r);
 }
 
@@ -348,7 +358,17 @@ wss.on('connection', ws => {
       case 'kick': if (r && r.host === token && !r.game) { const s = r.seats[+m.seat]; if (s && s.bot) { r.seats[+m.seat] = null; broadcast(r); } } break;
       case 'variant': if (r && r.host === token && !r.isPublic && (!r.game || r.game.phase === 'over')) { r.kind = kindOf(m); r.low = lowOf(m); r.game = null; r.wins = r.wins.map(() => 0); broadcast(r); } break;
       case 'target': if (r && r.host === token && T.TARGETS.includes(+m.target) && (!r.game || r.game.phase === 'over')) { r.target = +m.target; r.game = null; broadcast(r); } break;
-      case 'next': if (r && r.host === token && r.game && r.game.phase === 'hand') nextHand(r); break;
+      case 'next': {
+        // kraj ruke: svatko pritisne "Dalje"; kad su svi spremni, odmah nova ruka (inače nakon HAND_PAUSE)
+        if (!r || !r.game || r.game.phase !== 'hand') break;
+        const i = seatOf(r, token);
+        if (i < 0) break;
+        if (!r.ready) r.ready = new Set();
+        r.ready.add(i);
+        const humans = r.seats.map((x, q) => x && !x.bot && clients.get(x.token) && clients.get(x.token).ws ? q : -1).filter(q => q >= 0);
+        if (humans.every(q => r.ready.has(q))) nextHand(r); else broadcast(r);
+        break;
+      }
       case 'turnTime': if (r && r.host === token && !r.isPublic && (!r.game || r.game.phase === 'over')) { r.turnTime = turnTimeOf(m.turnTime); broadcast(r); } break;
       case 'level': if (r && r.host === token && ['easy', 'normal', 'hard'].includes(m.level)) { r.level = m.level; broadcast(r); } break;
       case 'start':

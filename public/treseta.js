@@ -28,10 +28,17 @@
   const RANK_PL = { 3: ['tri trice', 'četiri trice'], 2: ['tri dvice', 'četiri dvice'], 1: ['tri asa', 'četiri asa'] };
 
   function card(suit, rank) { return suit + '-' + rank; }
-  function suitOf(c) { return c.split('-')[0]; }
-  function rankOf(c) { return +c.split('-')[1]; }
-  function bele(c) { return BELE[rankOf(c)] || 0; }
-  function strength(c) { return STRENGTH[rankOf(c)]; }
+  // tablica svih karata: bot u jednom potezu ove funkcije zove stotine tisuća puta,
+  // pa se boja/broj ne smiju svaki put računati iz teksta (split je bio glavni trošak)
+  const INFO = Object.create(null);
+  for (const s of SUITS) for (const r of RANKS) INFO[card(s, r)] = { s, r, b: BELE[r] || 0, k: STRENGTH[r] };
+  function info(c) {
+    return INFO[c] || { s: c.split('-')[0], r: +c.split('-')[1], b: BELE[+c.split('-')[1]] || 0, k: STRENGTH[+c.split('-')[1]] };
+  }
+  function suitOf(c) { return info(c).s; }
+  function rankOf(c) { return info(c).r; }
+  function bele(c) { return info(c).b; }
+  function strength(c) { return info(c).k; }
   // za zajedničko sučelje s briškulom: "bodovi" karte u belama
   const points = bele;
 
@@ -41,16 +48,11 @@
     return r ? (w ? w : '') + (r === 1 ? '⅓' : '⅔') : String(w);
   }
 
-  function fullDeck() {
-    const d = [];
-    for (const s of SUITS) for (const r of RANKS) d.push(card(s, r));
-    return d;
-  }
-  function deckFor(mode) {
-    const d = fullDeck();
-    // u troje se izbacuje četvorka dinara (39 karata, 13 svakome)
-    return mode === 3 ? d.filter(c => c !== 'dinari-4') : d;
-  }
+  const FULL = Object.keys(INFO);
+  // u troje se izbacuje četvorka dinara (39 karata, 13 svakome)
+  const DECK3 = FULL.filter(c => c !== 'dinari-4');
+  function fullDeck() { return FULL.slice(); }
+  function deckFor(mode) { return (mode === 3 ? DECK3 : FULL).slice(); }
 
   function shuffle(arr, rng) {
     rng = rng || Math.random;

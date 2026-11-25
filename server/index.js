@@ -43,6 +43,10 @@ const rooms = new Map();   // code -> room
 
 const BOT_NAMES = ['Bot Jure', 'Bot Mare', 'Bot Ante', 'Bot Frane', 'Bot Luce', 'Bot Šime', 'Bot Bepo', 'Bot Tonka'];
 const CHAT_LEN = 200, CHAT_KEEP = 50, CHAT_GAP = 700;
+// vrijeme za potez (sekunde, 0 = bez ograničenja); kad istekne, partija je gotova
+const TURN_TIMES = [0, 15, 30, 60], TURN_DEFAULT = 30, TURN_GRACE = 1500;
+const TURN_SCALE = +process.env.BRK_TURN_SCALE || 1; // samo za testove
+const turnTimeOf = v => TURN_TIMES.includes(+v) ? +v : TURN_DEFAULT;
 const HAND_PAUSE = 9000, TRICK_PAUSE = 1400, BOT_DELAY = 750, AWAY_AUTOPLAY = 25000, ROOM_TTL = 30 * 60 * 1000;
 
 function code() {
@@ -94,6 +98,7 @@ function createRoom(mode, host, opts) {
     code: code(), mode, seats: Array(mode).fill(null), host, game: null, timer: null,
     level: ['easy', 'normal', 'hard'].includes(opts.level) ? opts.level : 'normal',
     isPublic: !!opts.isPublic, kind: opts.kind || 'briskula', low: !!opts.low, target: T.TARGETS.includes(+opts.target) ? +opts.target : 41, signals: [], chat: [], chatSeq: 0, wins: Array(mode === 4 ? 2 : mode).fill(0), touched: Date.now(), awayTimer: null,
+    turnTime: turnTimeOf(opts.turnTime), turnTimer: null, turnKey: null, turnEnds: 0,
   };
   rooms.set(r.code, r);
   return r;
@@ -144,7 +149,7 @@ function leaveCurrent(token) {
     const h = r.seats.find(s => s && !s.bot);
     r.host = h ? h.token : null;
   }
-  if (!r.seats.some(s => s && !s.bot)) { clearTimeout(r.timer); rooms.delete(r.code); return; }
+  if (!r.seats.some(s => s && !s.bot)) { clearTimeout(r.timer); stopTurnTimer(r); rooms.delete(r.code); return; }
   broadcast(r);
 }
 
@@ -165,8 +170,9 @@ function roomView(r, token) {
     if (c && c.sentImgs && c.sentImgs.has(id)) continue;
     if (IMGS.has(id)) { imgs[id] = IMGS.get(id); if (c && c.sentImgs) c.sentImgs.add(id); }
   }
+  const tl = turnLeft(r);
   return {
-    type: 'room', imgs,
+    type: 'room', imgs, turnTime: r.turnTime, turnLeft: tl,
     code: r.code, mode: r.mode, level: r.level, isPublic: r.isPublic, low: r.low, kind: r.kind, target: r.target,
     host: r.host === token, you, wins: r.wins,
     seats,
@@ -178,6 +184,7 @@ function roomView(r, token) {
 
 function broadcast(r) {
   r.touched = Date.now();
+  turnTimer(r); // pokreni/zaustavi timer za potez prije slanja, da klijenti vide odbrojavanje
   for (const s of r.seats) if (s && !s.bot) { const c = clients.get(s.token); if (c && c.room === r.code) send(c.ws, roomView(r, s.token)); }
 }
 
@@ -191,9 +198,48 @@ function startGame(r) {
   return true;
 }
 
+// timer za potez vrijedi samo kad su za stolom barem dva čovjeka
+function timedTurn(r) {
+  const g = r.game;
+  if (!g || g.phase !== 'play' || !r.turnTime) return false;
+  const s = r.seats[g.turn];
+  return !!s && !s.bot && r.seats.filter(x => x && !x.bot).length >= 2;
+}
+function turnLeft(r) { return r.turnTimer && timedTurn(r) ? Math.max(0, r.turnEnds - Date.now()) : null; }
+function stopTurnTimer(r) { clearTimeout(r.turnTimer); r.turnTimer = null; r.turnKey = null; }
+function turnTimer(r) {
+  if (!timedTurn(r)) return stopTurnTimer(r);
+  const g = r.game;
+  const key = [g.handNo || 0, g.trickNo, g.trick.length, g.turn].join(':');
+  if (r.turnTimer && r.turnKey === key) return; // isti potez (npr. ponovno spajanje): timer teče dalje
+  stopTurnTimer(r);
+  r.turnKey = key;
+  const ms = r.turnTime * 1000 * TURN_SCALE;
+  r.turnEnds = Date.now() + ms;
+  r.turnTimer = setTimeout(() => { r.turnTimer = null; if (r.turnKey === key && timedTurn(r)) forfeit(r, g.turn); }, ms + TURN_GRACE * TURN_SCALE);
+}
+
+// igrač nije odigrao na vrijeme: partija je gotova, njegova strana gubi
+function forfeit(r, p) {
+  const g = r.game;
+  const mode = r.mode, lost = E.teamOf(mode, p);
+  const teams = mode === 4 ? [[0, 2], [1, 3]] : Array.from({ length: mode }, (_, i) => [i]);
+  let scores;
+  if (r.kind === 'treseta') scores = teams.map((ps, t) => ({ team: t, players: ps, points: g.score[t] }));
+  else scores = teams.map((ps, t) => ({ team: t, players: ps, points: ps.reduce((a, i) => a + E.playerPoints(g, i), 0) }));
+  const winners = [].concat(...teams.filter((_, t) => t !== lost));
+  clearTimeout(r.timer); clearTimeout(r.awayTimer); stopTurnTimer(r);
+  g.phase = 'over';
+  g.result = { scores, winners, draw: false, low: !!r.low, forfeit: p, hands: (g.hands || []).slice(), target: g.target };
+  teams.forEach((_, t) => { if (t !== lost) r.wins[t]++; });
+  pushSignal(r, -1, g.players[p].name + ' nije odigrao/la na vrijeme. Partija je gotova.');
+  broadcast(r);
+}
+
 function schedule(r) {
   clearTimeout(r.timer); clearTimeout(r.awayTimer);
   const g = r.game;
+  turnTimer(r);
   if (!g) return;
   if (g.phase === 'collect') {
     r.timer = setTimeout(() => {
@@ -211,7 +257,8 @@ function schedule(r) {
     const s = r.seats[g.turn];
     const c = s && !s.bot ? clients.get(s.token) : null;
     if (s.bot) r.timer = setTimeout(() => botMove(r), BOT_DELAY + Math.random() * 400);
-    else if (!c || !c.ws) r.awayTimer = setTimeout(() => botMove(r), AWAY_AUTOPLAY);
+    // odspojeni igrač: ako nema timera za potez, bot nakon nekog vremena igra umjesto njega
+    else if ((!c || !c.ws) && !r.turnTimer) r.awayTimer = setTimeout(() => botMove(r), AWAY_AUTOPLAY);
   }
 }
 
@@ -267,7 +314,7 @@ wss.on('connection', ws => {
         const mode = +m.mode;
         if (![2, 3, 4].includes(mode)) return err('Neispravan način igre.');
         leaveCurrent(token);
-        const nr = createRoom(mode, token, { level: m.level, isPublic: false, kind: kindOf(m), low: lowOf(m), target: m.target });
+        const nr = createRoom(mode, token, { level: m.level, isPublic: false, kind: kindOf(m), low: lowOf(m), target: m.target, turnTime: m.turnTime });
         joinRoom(nr, token);
         broadcast(nr); break;
       }
@@ -302,6 +349,7 @@ wss.on('connection', ws => {
       case 'variant': if (r && r.host === token && !r.isPublic && (!r.game || r.game.phase === 'over')) { r.kind = kindOf(m); r.low = lowOf(m); r.game = null; r.wins = r.wins.map(() => 0); broadcast(r); } break;
       case 'target': if (r && r.host === token && T.TARGETS.includes(+m.target) && (!r.game || r.game.phase === 'over')) { r.target = +m.target; r.game = null; broadcast(r); } break;
       case 'next': if (r && r.host === token && r.game && r.game.phase === 'hand') nextHand(r); break;
+      case 'turnTime': if (r && r.host === token && !r.isPublic && (!r.game || r.game.phase === 'over')) { r.turnTime = turnTimeOf(m.turnTime); broadcast(r); } break;
       case 'level': if (r && r.host === token && ['easy', 'normal', 'hard'].includes(m.level)) { r.level = m.level; broadcast(r); } break;
       case 'start':
         if (!r || r.host !== token) return;
@@ -352,7 +400,7 @@ wss.on('connection', ws => {
 // čišćenje starih soba
 setInterval(() => {
   const now = Date.now();
-  for (const [k, r] of rooms) if (now - r.touched > ROOM_TTL) { clearTimeout(r.timer); rooms.delete(k); }
+  for (const [k, r] of rooms) if (now - r.touched > ROOM_TTL) { clearTimeout(r.timer); stopTurnTimer(r); rooms.delete(k); }
   for (const [k, c] of clients) if (!c.ws && !c.room) clients.delete(k);
 }, 60000).unref();
 

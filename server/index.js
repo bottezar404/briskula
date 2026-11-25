@@ -33,6 +33,7 @@ const clients = new Map(); // token -> { ws, name, room }
 const rooms = new Map();   // code -> room
 
 const BOT_NAMES = ['Bot Jure', 'Bot Mare', 'Bot Ante', 'Bot Frane', 'Bot Luce', 'Bot Šime', 'Bot Bepo', 'Bot Tonka'];
+const CHAT_LEN = 200, CHAT_KEEP = 50, CHAT_GAP = 700;
 const TRICK_PAUSE = 1400, BOT_DELAY = 750, AWAY_AUTOPLAY = 25000, ROOM_TTL = 30 * 60 * 1000;
 
 function code() {
@@ -42,12 +43,14 @@ function code() {
 }
 function send(ws, msg) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(msg)); }
 function clean(s, n) { return String(s || '').replace(/[<>]/g, '').trim().slice(0, n || 20); }
+// chat: bez kontrolnih znakova, razmaci sažeti, do 200 znakova
+function cleanChat(s) { return String(s || '').replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, CHAT_LEN); }
 
 function createRoom(mode, host, opts) {
   const r = {
     code: code(), mode, seats: Array(mode).fill(null), host, game: null, timer: null,
     level: ['easy', 'normal', 'hard'].includes(opts.level) ? opts.level : 'normal',
-    isPublic: !!opts.isPublic, low: !!opts.low, signals: [], wins: Array(mode === 4 ? 2 : mode).fill(0), touched: Date.now(), awayTimer: null,
+    isPublic: !!opts.isPublic, low: !!opts.low, signals: [], chat: [], chatSeq: 0, wins: Array(mode === 4 ? 2 : mode).fill(0), touched: Date.now(), awayTimer: null,
   };
   rooms.set(r.code, r);
   return r;
@@ -116,6 +119,7 @@ function roomView(r, token) {
     seats: r.seats.map(s => s ? { name: s.name, bot: !!s.bot, connected: s.bot || !!(clients.get(s.token) && clients.get(s.token).ws) } : null),
     game: g ? E.viewFor(g, you) : null,
     signals: r.signals.filter(s => s.team == null || (you >= 0 && s.team === E.teamOf(r.mode, you))).slice(-6),
+    chat: r.chat.slice(-30),
   };
 }
 
@@ -243,6 +247,19 @@ wss.on('connection', ws => {
         const text = clean(m.text, 40);
         if (!text) return;
         pushSignal(r, p, text, r.mode === 4 && m.team);
+        broadcast(r); break;
+      }
+      case 'chat': {
+        if (!r) return;
+        const p = seatOf(r, token);
+        if (p < 0) return;
+        const now = Date.now();
+        if (now - (c.lastChat || 0) < CHAT_GAP) return err('Polako, malo pričekaj.');
+        const text = cleanChat(m.text);
+        if (!text) return;
+        c.lastChat = now;
+        r.chat.push({ id: ++r.chatSeq, from: p, name: r.seats[p].name, text, t: now });
+        if (r.chat.length > CHAT_KEEP) r.chat.shift();
         broadcast(r); break;
       }
     }

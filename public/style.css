@@ -311,3 +311,71 @@ details.hist summary { cursor: pointer; text-align: center; margin-bottom: 6px; 
 }
 .bubble.akuza { animation: none; }
 .tcards .backs { padding: 0 calc(var(--sw) * .32); }
+
+/* ---------- avatari ---------- */
+.av { --s: 36px; position: relative; flex: 0 0 auto; width: var(--s); height: var(--s); border-radius: 50%; display: inline-block; background: rgba(0,0,0,.3); box-shadow: 0 0 0 2px rgba(255,255,255,.75), 0 2px 6px rgba(0,0,0,.4); }
+.av > svg, .av > img { width: 100%; height: 100%; display: block; border-radius: 50%; object-fit: cover; pointer-events: none; -webkit-user-drag: none; }
+.av.empty { box-shadow: 0 0 0 2px rgba(255,255,255,.25); background: rgba(0,0,0,.2); }
+.av.xs { --s: 20px; box-shadow: 0 0 0 1px rgba(255,255,255,.6); }
+.av.md { --s: 40px; }
+.av.lg { --s: 64px; box-shadow: 0 0 0 3px var(--gold), 0 3px 10px rgba(0,0,0,.4); }
+.av.turn { box-shadow: 0 0 0 3px var(--gold), 0 0 14px rgba(229,199,122,.8); }
+.av .cmb { position: absolute; right: -9px; bottom: -6px; background: var(--gold); color: #3a2a08; font-size: 10px; font-weight: 800; line-height: 1; padding: 2px 4px; border-radius: 7px; white-space: nowrap; box-shadow: 0 1px 3px rgba(0,0,0,.4); pointer-events: none; }
+.av .cmb small { font-size: 8px; margin-left: 1px; }
+.av.xs .cmb { display: none; }
+.av.lg .cmb { font-size: 12px; right: -6px; }
+
+/* izbornik: avatar + ime + dužina */
+.prof-row { display: flex; gap: 12px; align-items: center; }
+.prof-row input { flex: 1; min-width: 0; }
+.av-pick { position: relative; padding: 0; background: none; border-radius: 50%; flex: 0 0 auto; }
+.av-pick .pen { position: absolute; left: -4px; bottom: -4px; width: 24px; height: 24px; border-radius: 50%; background: var(--felt2); border: 2px solid var(--gold); color: var(--gold); font-size: 12px; line-height: 20px; text-align: center; }
+.cm-row { margin-top: 12px; }
+.cm-head { display: flex; justify-content: space-between; align-items: baseline; font-size: 15px; font-weight: 600; margin-bottom: 4px; }
+.cm-head b { color: var(--gold); font-size: 16px; }
+.cm-ctl { display: flex; gap: 8px; align-items: center; }
+.cm-ctl button { flex: 0 0 auto; width: 40px; padding: 6px 0; font-size: 18px; }
+.cm-ctl input[type=range] { flex: 1; min-width: 0; padding: 0; border: 0; background: none; accent-color: var(--gold); height: 28px; }
+.av-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(60px, 1fr)); gap: 10px; margin: 6px 0 14px; }
+.av-opt { padding: 0; aspect-ratio: 1; border-radius: 50%; background: rgba(0,0,0,.25); overflow: hidden; box-shadow: 0 0 0 2px rgba(255,255,255,.2); }
+.av-opt svg, .av-opt img { width: 100%; height: 100%; display: block; object-fit: cover; }
+.av-opt.on { box-shadow: 0 0 0 3px var(--gold), 0 0 12px rgba(229,199,122,.7); }
+label.upload { display: block; text-align: center; padding: 12px; border-radius: 12px; background: rgba(255,255,255,.12); font-weight: 700; cursor: pointer; }
+label.upload:active { transform: scale(.98); }
+
+/* predvorje */
+.seats li .n { display: flex; flex-direction: column; min-width: 0; }
+.seats .cmt { font-size: 12px; opacity: .75; }
+.msg .who .av { margin-right: 1px; }
+
+/* stol: avatar + pločica s imenom; oblačić poruke iznad avatara */
+.pl { display: flex; align-items: center; gap: 6px; max-width: 100%; }
+.pl .nameplate { min-width: 0; }
+.pl-right { flex-direction: row-reverse; }
+.av .bubble { position: absolute; top: auto; bottom: calc(100% + 9px); margin: 0; left: 50%; translate: -50% 0; transform: none;
+  white-space: normal; width: max-content; max-width: min(60vw, 240px); text-align: center; line-height: 1.25; pointer-events: none; transform-origin: 50% 100%; }
+.av .bubble::after { content: ''; position: absolute; top: 100%; left: 50%; margin-left: -7px; border: 7px solid transparent; border-top-color: var(--cream); border-bottom: 0; }
+.av .bubble.team::after { border-top-color: #dce8ff; }
+.av .bubble.akuza::after { border-top-color: #fff1bf; }
+.pl-left .av .bubble { left: -6px; translate: none; transform-origin: 12px 100%; }
+.pl-left .av .bubble::after { left: 24px; }
+.pl-right .av .bubble { left: auto; right: -6px; translate: none; transform-origin: calc(100% - 12px) 100%; }
+.pl-right .av .bubble::after { left: auto; right: 24px; margin: 0 -7px 0 0; }
+.av .bubble.chatb { overflow: visible; display: block; }
+.seat.right .av .bubble.chatb, .seat.right .av .bubble.akuza { right: -6px; }
+.seat.left .av .bubble.chatb, .seat.left .av .bubble.akuza { left: -6px; }
+@media (max-width: 899px) {
+  .pl .av { --s: 32px; }
+  .pl .nameplate { max-width: 34vw; }
+  .mode4 .pl .nameplate { max-width: 36vw; }
+  .pl-me .nameplate { max-width: 60vw; }
+}
+@media (min-width: 900px) and (min-height: 520px) {
+  .pl { gap: 10px; }
+  .pl .av { --s: 54px; }
+  .pl .av .cmb { font-size: 12px; }
+  .me > .mypl { order: -1; min-width: 180px; display: flex; justify-content: flex-end; }
+  .av .bubble { max-width: 300px; }
+}
+/* karte gornjeg igrača vire preko ruba (negativni razmak), pa avatar malo odmaknemo */
+.seat.top .backs + .pl, .seat.top .partner-hand + .pl { margin-left: calc(var(--sw) * .34); }

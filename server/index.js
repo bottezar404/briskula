@@ -9,6 +9,7 @@ const E = require('../public/engine.js');
 const B = require('../public/bot.js');
 const T = require('../public/treseta.js');
 const TB = require('../public/treseta-bot.js');
+const AV = require('../public/avatars.js');
 // igra: briškula ili trešeta; low = "Chi fa meno" (na manje) za obje
 // (stari klijenti šalju kind 'meno' = briškula na manje)
 const kindOf = m => m.kind === 'treseta' ? 'treseta' : 'briskula';
@@ -54,6 +55,40 @@ function clean(s, n) { return String(s || '').replace(/[<>]/g, '').trim().slice(
 // chat: bez kontrolnih znakova, razmaci sažeti, do 200 znakova
 function cleanChat(s) { return String(s || '').replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, CHAT_LEN); }
 
+// ---------- profil: avatar i "dužina pišulinca" ----------
+// slike se drže jednom po sadržaju (hash) i šalju klijentu samo prvi put
+const IMGS = new Map(), IMG_KEEP = 600;
+function cleanAv(av) { const m = /^e(\d{1,2})$/.exec(String(av || '')); return m && +m[1] < AV.N ? 'e' + +m[1] : null; }
+function cleanImg(d) {
+  if (typeof d !== 'string' || d.length > AV.MAX_LEN + 200) return null;
+  const m = /^data:image\/jpeg;base64,([A-Za-z0-9+/]+={0,2})$/.exec(d);
+  if (!m) return null;
+  const head = Buffer.from(m[1].slice(0, 8), 'base64');
+  if (head[0] !== 0xff || head[1] !== 0xd8 || head[2] !== 0xff) return null; // nije JPEG
+  return d;
+}
+function storeImg(d) {
+  const id = crypto.createHash('sha1').update(d).digest('hex').slice(0, 12);
+  IMGS.delete(id); IMGS.set(id, d);
+  while (IMGS.size > IMG_KEEP) IMGS.delete(IMGS.keys().next().value);
+  return id;
+}
+const cleanCm = v => { v = Math.round(+v); return v >= 1 && v <= 50 ? v : 0; };
+function setProfile(c, m) {
+  if ('name' in m) c.name = clean(m.name) || c.name || 'Igrač';
+  if ('cm' in m) c.cm = cleanCm(m.cm);
+  if ('av' in m) {
+    if (m.av === 'img') { const d = cleanImg(m.img); c.av = d ? 'i:' + storeImg(d) : (c.av || 'e0'); }
+    else c.av = cleanAv(m.av) || c.av || null;
+  }
+}
+// prikaz mjesta: ljudi uvijek s trenutnim profilom
+function seatAv(s) {
+  if (s.bot) return { av: s.av || AV.forName(s.name), cm: s.cm || 0 };
+  const c = clients.get(s.token);
+  return { av: (c && c.av) || AV.forName(s.name), cm: (c && c.cm) || 0 };
+}
+
 function createRoom(mode, host, opts) {
   const r = {
     code: code(), mode, seats: Array(mode).fill(null), host, game: null, timer: null,
@@ -71,7 +106,7 @@ function addBot(r) {
   if (i < 0) return false;
   const used = new Set(r.seats.filter(Boolean).map(s => s.name));
   const name = BOT_NAMES.find(n => !used.has(n)) || 'Bot';
-  r.seats[i] = { bot: true, name };
+  r.seats[i] = { bot: true, name, av: AV.forName(name) };
   return true;
 }
 
@@ -98,7 +133,8 @@ function leaveCurrent(token) {
   if (i < 0) return;
   if (r.game && r.game.phase !== 'over') {
     // tijekom igre bot preuzima mjesto
-    r.seats[i] = { bot: true, name: r.seats[i].name + ' (bot)' };
+    const p = seatAv(r.seats[i]);
+    r.seats[i] = { bot: true, name: r.seats[i].name + ' (bot)', av: p.av, cm: p.cm };
     r.game.players[i].bot = true;
     r.game.players[i].name = r.seats[i].name;
     pushSignal(r, -1, r.seats[i].name.replace(' (bot)', '') + ' je napustio/la igru, bot igra umjesto njega/nje.');
@@ -120,11 +156,20 @@ function pushSignal(r, from, text, teamOnly) {
 function roomView(r, token) {
   const you = seatOf(r, token);
   const g = r.game;
+  const c = clients.get(token);
+  const seats = r.seats.map(s => s ? Object.assign({ name: s.name, bot: !!s.bot, connected: s.bot || !!(clients.get(s.token) && clients.get(s.token).ws) }, seatAv(s)) : null);
+  // slike koje ovaj klijent još nije dobio
+  const imgs = {};
+  for (const s of seats) if (s && s.av.startsWith('i:')) {
+    const id = s.av.slice(2);
+    if (c && c.sentImgs && c.sentImgs.has(id)) continue;
+    if (IMGS.has(id)) { imgs[id] = IMGS.get(id); if (c && c.sentImgs) c.sentImgs.add(id); }
+  }
   return {
-    type: 'room',
+    type: 'room', imgs,
     code: r.code, mode: r.mode, level: r.level, isPublic: r.isPublic, low: r.low, kind: r.kind, target: r.target,
     host: r.host === token, you, wins: r.wins,
-    seats: r.seats.map(s => s ? { name: s.name, bot: !!s.bot, connected: s.bot || !!(clients.get(s.token) && clients.get(s.token).ws) } : null),
+    seats,
     game: g ? engOf(r).viewFor(g, you) : null,
     signals: r.signals.filter(s => s.team == null || (you >= 0 && s.team === E.teamOf(r.mode, you))).slice(-6),
     chat: r.chat.slice(-30),
@@ -196,6 +241,8 @@ wss.on('connection', ws => {
       if (old && old.ws && old.ws !== ws) try { old.ws.close(); } catch { }
       const c = old || { room: null };
       c.ws = ws; c.name = clean(m.name) || c.name || 'Igrač';
+      c.sentImgs = new Set(); // nova veza: slike treba poslati ponovno
+      setProfile(c, { av: m.av, img: m.img, cm: m.cm });
       clients.set(token, c);
       send(ws, { type: 'welcome', token });
       const r = c.room && rooms.get(c.room);
@@ -209,6 +256,13 @@ wss.on('connection', ws => {
     const err = msg => send(ws, { type: 'error', msg });
     switch (m.type) {
       case 'setName': c.name = clean(m.name) || c.name; break;
+      case 'profile': {
+        setProfile(c, m);
+        const i = r ? seatOf(r, token) : -1;
+        if (i >= 0 && (!r.game || r.game.phase === 'over')) r.seats[i].name = c.name;
+        if (r) broadcast(r);
+        break;
+      }
       case 'create': {
         const mode = +m.mode;
         if (![2, 3, 4].includes(mode)) return err('Neispravan način igre.');

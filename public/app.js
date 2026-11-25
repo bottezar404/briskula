@@ -36,12 +36,15 @@
     avatar: store.get('avatar', 'e' + Math.floor(Math.random() * AV.N)),
     avatarImg: store.get('avatarImg', ''),
     cm: store.get('cm', 0),
+    turnTime: store.get('turnTime', 30), // online: sekunde za potez (0 = bez ograničenja)
   };
   if (!/^e\d{1,2}$/.test(S.avatar) && !(S.avatar === 'img' && S.avatarImg)) S.avatar = 'e0';
   S.cm = Math.max(0, Math.min(50, Math.round(+S.cm) || 0));
   if (!KIND_NAMES[S.kind]) S.kind = 'briskula'; // stari 'meno' = briškula na manje
   S.naManje = S.naManje ? 1 : 0;
   if (![21, 31, 41].includes(S.target)) S.target = 41;
+  if (![0, 15, 30, 60].includes(S.turnTime)) S.turnTime = 30;
+  const TURN_OPTS = [[15, '15 s'], [30, '30 s'], [60, '60 s'], [0, 'Bez']];
   function save() { for (const k in S) store.set(k, S[k]); }
 
   // ---------- avatari ----------
@@ -171,6 +174,8 @@
   let prev = null;
   const seenSignals = new Map();
   function onRoom(r) {
+    // timer za potez: server šalje koliko je ostalo, ovdje to pretvaramo u lokalni rok
+    r.turnDeadline = r.turnLeft != null ? Date.now() + r.turnLeft : 0;
     const old = room; room = r;
     const g = r.game, og = old && old.game;
     if (g && og) {
@@ -349,7 +354,7 @@
     const needName = () => { if (!S.name) { S.name = 'Igrač' + Math.floor(Math.random() * 900 + 100); save(); } };
     $app.querySelector('#playBots').onclick = () => { needName(); ctrl = new LocalGame(+S.botMode, S.botLevel, S.name, S.kind, S.target, !!S.naManje); };
     if (!window.BRK_OFFLINE) {
-    $app.querySelector('#create').onclick = () => { needName(); ctrl = getNet(); ctrl.send(profileMsg()); ctrl.send({ type: 'create', mode: +S.onMode, level: 'normal', kind: S.kind, low: !!S.naManje, target: S.target }); };
+    $app.querySelector('#create').onclick = () => { needName(); ctrl = getNet(); ctrl.send(profileMsg()); ctrl.send({ type: 'create', mode: +S.onMode, level: 'normal', kind: S.kind, low: !!S.naManje, target: S.target, turnTime: S.turnTime }); };
     $app.querySelector('#quick').onclick = () => { needName(); ctrl = getNet(); ctrl.send(profileMsg()); ctrl.send({ type: 'quick', mode: +S.onMode, kind: S.kind, low: !!S.naManje }); };
     const join = () => {
       const c = $app.querySelector('#code').value.trim().toUpperCase();
@@ -404,9 +409,13 @@
           <div class="muted" style="margin-bottom:6px">Vrsta igre</div>
           ${seg('roomKind', KINDS, r.kind || 'briskula')}
           ${seg('roomLow', LOWS, r.low ? 1 : 0)}
-          ${r.kind === 'treseta' ? seg('roomTarget', [[21, 'Do 21'], [31, 'Do 31'], [41, 'Do 41']], r.target) : ''}`
+          ${r.kind === 'treseta' ? seg('roomTarget', [[21, 'Do 21'], [31, 'Do 31'], [41, 'Do 41']], r.target) : ''}
+          <div class="muted" style="margin-bottom:6px">Vrijeme za potez</div>
+          ${seg('roomTime', TURN_OPTS, r.turnTime || 0)}
+          <p class="muted" style="margin-top:-4px">${turnTimeDesc(r.turnTime)}</p>`
         : r.kind === 'treseta' ? `<p class="muted">Igra se <b>trešeta</b>${r.low ? ' ' + LOW_NAME + ' (pobjeđuje tko ima manje)' : ''} do ${r.target} bodova.</p>`
         : r.low ? `<p class="muted">Igra se <b>${LOW_NAME}</b>: pobjeđuje tko skupi manje bodova.</p>` : ''}
+        ${!r.host || r.isPublic ? `<p class="muted">${turnTimeDesc(r.turnTime)}</p>` : ''}
         ${r.host ? `
           <div class="muted" style="margin-bottom:6px">Jačina botova</div>
           ${seg('roomLevel', [['easy', 'Lako'], ['normal', 'Srednje'], ['hard', 'Teško']], r.level)}
@@ -431,9 +440,35 @@
       $app.querySelectorAll('[data-seg="roomKind"] button').forEach(b => b.onclick = () => ctrl.send({ type: 'variant', kind: b.dataset.v, low: !!r.low }));
       $app.querySelectorAll('[data-seg="roomLow"] button').forEach(b => b.onclick = () => ctrl.send({ type: 'variant', kind: r.kind || 'briskula', low: b.dataset.v === '1' }));
       $app.querySelectorAll('[data-seg="roomTarget"] button').forEach(b => b.onclick = () => ctrl.send({ type: 'target', target: +b.dataset.v }));
+      $app.querySelectorAll('[data-seg="roomTime"] button').forEach(b => b.onclick = () => { S.turnTime = +b.dataset.v; save(); ctrl.send({ type: 'turnTime', turnTime: +b.dataset.v }); });
       $app.querySelectorAll('[data-seg="roomLevel"] button').forEach(b => b.onclick = () => ctrl.send({ type: 'level', level: b.dataset.v }));
     }
   }
+
+  function turnTimeDesc(t) {
+    return t ? `⏱ Svaki igrač ima <b>${t} s</b> za potez. Tko ne odigra na vrijeme, gubi partiju.` : '⏱ Bez ograničenja vremena za potez.';
+  }
+  // odbrojavanje oko avatara igrača na potezu
+  function turnRing(r, g, p) {
+    if (!r.turnDeadline || g.phase !== 'play' || g.turn !== p) return '';
+    const total = (r.turnTime || 30) * 1000, left = Math.max(0, r.turnDeadline - Date.now());
+    return `<span class="tt" style="--d:${total}ms;--e:-${total - left}ms"><svg viewBox="0 0 40 40"><circle class="trk" cx="20" cy="20" r="18"/><circle class="run" cx="20" cy="20" r="18" pathLength="100"/></svg><b class="ttn" data-dl="${r.turnDeadline}">${Math.ceil(left / 1000)}</b></span>`;
+  }
+  let tickBeep = 0;
+  setInterval(() => {
+    const els = document.querySelectorAll('[data-dl]');
+    for (const el of els) {
+      const s = Math.max(0, Math.ceil((+el.dataset.dl - Date.now()) / 1000));
+      if (el.textContent !== String(s)) el.textContent = s;
+      el.classList.toggle('low', s <= 10);
+    }
+    // kratki zvuk u zadnjih 5 sekundi kad sam ja na potezu
+    const g = room && room.game;
+    if (g && room.turnDeadline && g.phase === 'play' && g.turn === g.you) {
+      const s = Math.ceil((room.turnDeadline - Date.now()) / 1000);
+      if (s <= 5 && s > 0 && s !== tickBeep) { tickBeep = s; beep(880, .05, 'square'); }
+    }
+  }, 250);
 
   function leave() {
     if (ctrl) ctrl.leave();
@@ -491,7 +526,7 @@
       const pts = S.showPoints ? `<span class="pts">${ptsText(g, pl.points)}</span>` : `<span class="muted">${pl.wonCount}</span>`;
       const turn = g.phase === 'play' && g.turn === p;
       // avatar s oblačićem poruke iznad njega, pa pločica s imenom i bodovima
-      return `<div class="pl pl-${p === me ? 'me' : posOf(p, g)}">${avatar(seat || { name: pl.name }, turn ? 'turn' : '', bubble(p))}<div class="nameplate ${turn ? 'turn' : ''}">
+      return `<div class="pl pl-${p === me ? 'me' : posOf(p, g)}">${avatar(seat || { name: pl.name }, turn ? 'turn' : '', bubble(p) + turnRing(r, g, p))}<div class="nameplate ${turn ? 'turn' : ''}">
         ${g.mode === 4 ? `<span class="dot t${p % 2}"></span>` : ''}${esc(pl.name)}${off ? ' <span class="off">⚠</span>' : ''} ${pts}</div></div>`;
     };
     const bubble = p => bubbles[p] ? `<div class="bubble ${bubbles[p].team != null ? 'team' : ''} ${bubbles[p].chat ? 'chatb' : ''} ${bubbles[p].akuza ? 'akuza' : ''}">${esc(bubbles[p].text)}</div>` : '';
@@ -555,7 +590,7 @@
 
     // poruka
     let status = '';
-    if (g.phase === 'play') status = myTurn ? 'Na potezu si' : 'Igra ' + esc(g.players[g.turn].name) + '…';
+    if (g.phase === 'play') status = (myTurn ? 'Na potezu si' : 'Igra ' + esc(g.players[g.turn].name) + '…') + (r.turnDeadline ? ` · ⏱ <b class="ttn" data-dl="${r.turnDeadline}">${Math.max(0, Math.ceil((r.turnDeadline - now) / 1000))}</b> s` : '');
     else if (g.phase === 'collect') {
       const w = g.trick[winIdx].p;
       let pts = g.trick.reduce((s, t) => s + G.points(t.card), 0);
@@ -682,6 +717,8 @@
     el.onclick = e => { if (e.target === el && modal) { modal = null; render(); } };
   }
 
+  const isWinRow = (res, s) => !res.draw && s.players.every(p => res.winners.includes(p));
+  const forfeitNote = (g, res) => `<p class="forfeit">⏱ ${res.forfeit === g.you ? 'Nisi odigrao/la na vrijeme' : esc(g.players[res.forfeit].name) + ' nije odigrao/la na vrijeme'}, pa je partija gotova.</p>`;
   function resultHtml() {
     const r = room, g = r.game, res = g.result, me = g.you;
     const myTeam = E.teamOf(g.mode, me);
@@ -690,11 +727,11 @@
     const rows = res.scores.slice().sort((a, b) => g.low ? a.points - b.points : b.points - a.points).map(s => {
       const names = s.players.map(p => esc(g.players[p].name)).join(' & ');
       const mine = s.players.includes(me);
-      return `<tr class="${!res.draw && res.winners.join() === s.players.join() ? 'win' : ''}"><td>${names}${mine ? ' (ti)' : ''}</td><td>${s.points}</td></tr>`;
+      return `<tr class="${isWinRow(res, s) ? 'win' : ''}"><td>${names}${mine ? ' (ti)' : ''}</td><td>${s.points}</td></tr>`;
     }).join('');
     const tally = g.mode === 4 ? `Ukupno partija: <b>${r.wins[myTeam]} : ${r.wins[1 - myTeam]}</b>` : 'Pobjede: ' + r.seats.map((s, i) => esc(s.name) + ' ' + r.wins[i]).join(' · ');
     const canRestart = r.local || r.host;
-    const lowNote = !g.low ? '' : res.kapot
+    const lowNote = res.forfeit != null ? forfeitNote(g, res) : !g.low ? '' : res.kapot
       ? `<p style="text-align:center"><b>Kapot!</b> ${esc(res.winners.map(p => g.players[p].name).join(' & '))} ${res.winners.length > 1 ? 'su pokupili' : 'je pokupio/la'} svih 120 bodova i pobjeđuje.</p>`
       : `<p class="muted" style="text-align:center">${LOW_NAME}: pobjeđuje tko ima manje bodova.</p>`;
     return `<div class="result-big">${title}</div>
@@ -732,14 +769,14 @@
     const won = res.winners.includes(me);
     const title = won ? (g.mode === 4 ? 'Pobijedili ste!' : 'Pobijedio/la si!') : (g.mode === 4 ? 'Izgubili ste' : 'Izgubio/la si');
     const rows = res.scores.slice().sort((a, b) => g.low ? a.points - b.points : b.points - a.points).map(s =>
-      `<tr class="${res.winners.join() === s.players.join() ? 'win' : ''}"><td>${teamName(g, s.team, me)}</td><td>${s.points}</td></tr>`).join('');
+      `<tr class="${isWinRow(res, s) ? 'win' : ''}"><td>${teamName(g, s.team, me)}</td><td>${s.points}</td></tr>`).join('');
     const n = res.scores.length;
     const head = res.scores.map(s => `<td>${g.mode === 4 ? (s.team === myTeam ? 'Mi' : 'Vi') : esc(g.players[s.team].name.replace(/^Bot /, ''))}</td>`).join('');
     const hist = res.hands.map(h => `<tr><td>${h.handNo}.</td>${h.points.map((p, t) => `<td>${p} <span class="muted">(${h.score[t]})</span></td>`).join('')}</tr>`).join('');
     const tally = g.mode === 4 ? `Ukupno partija: <b>${r.wins[myTeam]} : ${r.wins[1 - myTeam]}</b>` : 'Pobjede: ' + r.seats.map((s, i) => esc(s.name) + ' ' + r.wins[i]).join(' · ');
     const canRestart = r.local || r.host;
     return `<div class="result-big">${title}</div>
-      ${g.low ? `<p class="muted" style="text-align:center">${LOW_NAME}: pobjeđuje tko ima manje bodova.</p>` : ''}
+      ${res.forfeit != null ? forfeitNote(g, res) : g.low ? `<p class="muted" style="text-align:center">${LOW_NAME}: pobjeđuje tko ima manje bodova.</p>` : ''}
       <table class="scores">${rows}</table>
       <details class="hist"><summary class="muted">Bodovi po rukama</summary>
         <table class="scores small"><tr class="th"><td>Ruka</td>${head}</tr>${hist}</table></details>

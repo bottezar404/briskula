@@ -320,22 +320,23 @@ details.hist summary { cursor: pointer; text-align: center; margin-bottom: 6px; 
 .av.md { --s: 40px; }
 .av.lg { --s: 64px; box-shadow: 0 0 0 3px var(--gold), 0 3px 10px rgba(0,0,0,.4); }
 .av.turn { box-shadow: 0 0 0 3px var(--gold), 0 0 14px rgba(229,199,122,.8); }
-.av .cmb { position: absolute; right: -9px; bottom: -6px; background: var(--gold); color: #3a2a08; font-size: 10px; font-weight: 800; line-height: 1; padding: 2px 4px; border-radius: 7px; white-space: nowrap; box-shadow: 0 1px 3px rgba(0,0,0,.4); pointer-events: none; }
-.av .cmb small { font-size: 8px; margin-left: 1px; }
-.av.xs .cmb { display: none; }
-.av.lg .cmb { font-size: 12px; right: -6px; }
 
 /* izbornik: avatar + ime + dužina */
 .prof-row { display: flex; gap: 12px; align-items: center; }
 .prof-row input { flex: 1; min-width: 0; }
 .av-pick { position: relative; padding: 0; background: none; border-radius: 50%; flex: 0 0 auto; }
 .av-pick .pen { position: absolute; left: -4px; bottom: -4px; width: 24px; height: 24px; border-radius: 50%; background: var(--felt2); border: 2px solid var(--gold); color: var(--gold); font-size: 12px; line-height: 20px; text-align: center; }
-.cm-row { margin-top: 12px; }
-.cm-head { display: flex; justify-content: space-between; align-items: baseline; font-size: 15px; font-weight: 600; margin-bottom: 4px; }
-.cm-head b { color: var(--gold); font-size: 16px; }
-.cm-ctl { display: flex; gap: 8px; align-items: center; }
-.cm-ctl button { flex: 0 0 auto; width: 40px; padding: 6px 0; font-size: 18px; }
-.cm-ctl input[type=range] { flex: 1; min-width: 0; padding: 0; border: 0; background: none; accent-color: var(--gold); height: 28px; }
+.prof-stats { display: flex; width: 100%; margin-top: 12px; padding: 8px 6px; gap: 4px; justify-content: space-around; background: rgba(0,0,0,.22); border: 1px solid rgba(232,193,90,.35); border-radius: 12px; color: var(--cream); font-weight: 400; box-shadow: none; }
+.prof-stats > span { display: flex; flex-direction: column; align-items: center; flex: 1; min-width: 0; }
+.prof-stats b { color: var(--gold); font-size: 16px; white-space: nowrap; }
+.prof-stats small { font-size: 12px; opacity: .75; }
+.prof-stats.guest > span { font-size: 13px; opacity: .85; }
+.st-sum { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin: 4px 0 6px; }
+.st-tile { display: flex; flex-direction: column; align-items: center; padding: 8px 2px; border-radius: 10px; background: rgba(0,0,0,.22); border: 1px solid rgba(232,193,90,.3); }
+.st-tile b { color: var(--gold); font-size: 15px; white-space: nowrap; }
+.st-tile small { font-size: 11px; opacity: .75; }
+@media (max-width: 380px) { .st-sum { grid-template-columns: repeat(2, 1fr); } }
+.st-note { margin: 0 0 10px; font-size: 12.5px; }
 .av-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(60px, 1fr)); gap: 10px; margin: 6px 0 14px; }
 .av-opt { padding: 0; aspect-ratio: 1; border-radius: 50%; background: rgba(0,0,0,.25); overflow: hidden; box-shadow: 0 0 0 2px rgba(255,255,255,.2); }
 .av-opt svg, .av-opt img { width: 100%; height: 100%; display: block; object-fit: cover; }
@@ -373,7 +374,6 @@ label.upload:active { transform: scale(.98); }
 @media (min-width: 900px) and (min-height: 520px) {
   .pl { gap: 10px; }
   .pl .av { --s: 54px; }
-  .pl .av .cmb { font-size: 12px; }
   .me > .mypl { order: -1; min-width: 180px; display: flex; justify-content: flex-end; }
   .av .bubble { max-width: 300px; }
 }
@@ -393,7 +393,7 @@ label.upload:active { transform: scale(.98); }
 .ttn.low { color: #ff7a6a; }
 .forfeit { text-align: center; margin: 4px 0 10px; padding: 8px 10px; border-radius: 10px; background: rgba(184,50,42,.25); border: 1px solid rgba(255,90,74,.5); }
 
-/* dužina pišulinca ispod avatara u igri */
+/* pločica ispod avatara u igri (broj pobjeda / bot / gost) */
 .avw { display: inline-flex; flex-direction: column; align-items: center; gap: 2px; flex: none; }
 .cml { background: var(--gold); color: #3a2a08; font-size: 10px; font-weight: 800; line-height: 1; padding: 2px 5px; border-radius: 7px; white-space: nowrap; box-shadow: 0 1px 3px rgba(0,0,0,.4); }
 .cml.secret { background: rgba(0,0,0,.5); color: #fff; font-weight: 600; opacity: .85; }

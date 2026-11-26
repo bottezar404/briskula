@@ -1,6 +1,6 @@
 /* Korisnički računi: registracija, prijava, profil, statistika i prijatelji.
  * Zapisi u pohrani (store.js):
- *   user:<id>   { id, uname, name, pass, av, img, cm, stats, friends: { <id>: 'ok'|'out'|'in' }, created, seen,
+ *   user:<id>   { id, uname, name, pass, av, img, stats, friends: { <id>: 'ok'|'out'|'in' }, created, seen,
  *                 chips, refills, chipsLast: { d, t, refill } }   (žetoni za poker; chips nema dok se prvi put ne igra)
  *                 duk, dukLast: { n, why, t }, dukDay: { d, bots, daily }, inv: [id predmeta], eq: { fr, bd, ti, tb, kb }
  *                 (dukati i trgovina, vidi public/shop.js; duk nema dok se prvi put ne zatraži)
@@ -20,6 +20,7 @@ const DM_KEEP = 200, LOBBY_KEEP = 100;
 // a nakon partije se na račun vraća ono s čim je igrač završio. Tko padne ispod WALLET_MIN, dobije dopunu do WALLET_MIN.
 const WALLET_START = 5000, WALLET_MIN = 1000; // koliko zadnjih poruka po razgovoru se čuva
 // vrste igara u statistici
+const MAX_GAME_MS = 3 * 3600e3; // jedna partija se broji najviše 3 sata (npr. ostavljena otvorena)
 const STAT_KEYS = ['briskula', 'briskula_meno', 'treseta', 'treseta_meno', 'poker', 'turnir', 'covjece', 'kviz'];
 const statKey = (kind, low) => kind === 'poker' || kind === 'turnir' || kind === 'covjece' || kind === 'kviz' ? kind : (kind === 'treseta' ? 'treseta' : 'briskula') + (low ? '_meno' : '');
 
@@ -76,7 +77,7 @@ function create(store) {
       const p = profile || {};
       const u = {
         id: nextId++, uname, name: p.name || uname, pass: hashPass(pass),
-        av: p.av || null, img: p.img || null, cm: p.cm || 0,
+        av: p.av || null, img: p.img || null,
         stats: { online: {}, bots: {} }, friends: {}, created: Date.now(), seen: Date.now(),
       };
       byName.set(uname.toLowerCase(), u.id);
@@ -141,21 +142,29 @@ function create(store) {
       });
     },
 
-    /** profil (već provjeren u serveru): name, av ('eN' ili 'img'), img (data URL), cm */
+    /** profil (već provjeren u serveru): name, av ('eN' ili 'img'), img (data URL) */
     setProfile(u, p) {
       let ch = false;
-      for (const k of ['name', 'av', 'img', 'cm']) if (k in p && p[k] !== u[k]) { u[k] = p[k]; ch = true; }
+      for (const k of ['name', 'av', 'img']) if (k in p && p[k] !== u[k]) { u[k] = p[k]; ch = true; }
       if (ch) save(u);
     },
     touch(u) { u.seen = Date.now(); save(u); },
 
-    /** upiši odigranu partiju: section 'online' ili 'bots', res 'w' | 'l' | 'd' */
-    record(u, section, key, res) {
+    /** upiši odigranu partiju: section 'online' ili 'bots', res 'w' | 'l' | 'd', ms = trajanje partije */
+    record(u, section, key, res, ms) {
       if (!STAT_KEYS.includes(key) || !['online', 'bots'].includes(section)) return;
       const sec = u.stats[section] || (u.stats[section] = {});
       const s = sec[key] || (sec[key] = { p: 0, w: 0, d: 0 });
       s.p++; if (res === 'w') s.w++; else if (res === 'd') s.d++;
+      ms = Math.round(+ms || 0);
+      if (ms > 0) s.t = (s.t || 0) + Math.min(ms, MAX_GAME_MS);
       save(u);
+    },
+    /** zbroj svih igara (online + botovi): partije, pobjede, odigrano vrijeme (ms) */
+    summary(u) {
+      const r = { p: 0, w: 0, t: 0 };
+      for (const sec of ['online', 'bots']) for (const x of Object.values((u && u.stats && u.stats[sec]) || {})) { r.p += x.p || 0; r.w += x.w || 0; r.t += x.t || 0; }
+      return r;
     },
 
     // ---------- kviz bodovi (skupljaju se na računu, iz svih kvizova) ----------

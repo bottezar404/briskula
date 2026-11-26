@@ -473,11 +473,25 @@ function schedule(r) {
 }
 
 // ---------- kviz: svi odgovaraju istodobno ----------
+// kviz bodovi na računu: nakon otkrivanja odgovora svakom prijavljenom se dodaju bodovi s pitanja
+// (jednom po pitanju; uidOf(i) vraća id računa igrača na mjestu i ili null za gosta/bota)
+function kvPay(g, key, uidOf) {
+  if (g.phase !== 'collect' || g.stage !== 'reveal' || g.kvPaid === key) return;
+  g.kvPaid = key;
+  const q = g.qs[g.qi], done = new Set(); // isti račun u dvije kartice dobije bodove samo jednom
+  g.players.forEach((pl, i) => {
+    const uid = uidOf(i), u = uid && !done.has(uid) && ACC.user(uid);
+    if (!u || !pl.ans) return;
+    done.add(uid);
+    ACC.addKviz(u, pl.ans.ok ? pl.ans.pts : 0, q && q.cat, !!pl.ans.ok);
+  });
+}
 function kvStop(r) { for (const t of r.kvBots || []) clearTimeout(t); r.kvBots = []; r.kvQ = -1; }
 function kvSchedule(r) {
   const g = r.game;
   if (g.phase === 'collect') {
     kvStop(r);
+    if (r.uids) kvPay(g, g.qi, i => r.uids && r.seats[i] && !r.seats[i].bot ? r.uids[i] : null);
     // rok pauze se pamti, da je npr. ponovno spajanje igrača ne produlji
     const key = g.qi + ':' + g.stage;
     if (!r.kvDue || r.kvDue.g !== g || r.kvDue.key !== key) r.kvDue = { g, key, at: Date.now() + g.wait * PACE_SCALE };
@@ -540,6 +554,15 @@ const kvCode = kr => 'KV-' + kr.id.toUpperCase();
 function kvListMsg() {
   return { type: 'kvList', rooms: [...KV_ROOMS.values()].map(kr => ({ id: kr.id, code: kvCode(kr), name: kr.name, icon: kr.icon, n: kr.members.length, max: KVR_MAX })) };
 }
+// ljestvica kviz bodova (svi kvizovi zajedno, ili jedna kategorija)
+function kvTopMsg(c, cat) {
+  cat = KV.CATS.some(x => x.id === cat) ? cat : null;
+  const me = c && c.uid && ACC.user(c.uid);
+  const t = ACC.kvizTop(10, cat, me);
+  const row = x => ({ uname: x.u.uname, name: x.u.name || x.u.uname, av: x.u.av === 'img' && x.u.img ? 'i:' + storeImg(x.u.img) : x.u.av || AV.forName(x.u.name || x.u.uname), cm: x.u.cm || 0, pts: x.pts, rank: x.rank, me: !!me && x.u.id === me.id });
+  const top = t.top.map(row);
+  return { type: 'kvTop', cat, top, me: t.me ? row(t.me) : null, players: t.players, guest: !me, imgs: newImgs(c, top.map(x => x.av)) };
+}
 let kvListTimer = null;
 function kvListSoon() {
   if (kvListTimer) return;
@@ -552,8 +575,8 @@ function kvListSoon() {
 function kvrView(kr, token) {
   const g = kr.game, you = kr.members.indexOf(token), c = clients.get(token);
   const seats = kr.members.map(t => {
-    const sc = clients.get(t);
-    return Object.assign({ name: (sc && sc.name) || 'Igrač', bot: false, connected: !!(sc && sc.ws) }, seatAv({ token: t, name: (sc && sc.name) || 'Igrač' }));
+    const sc = clients.get(t), su = sc && sc.uid && ACC.user(sc.uid);
+    return Object.assign({ name: (sc && sc.name) || 'Igrač', bot: false, connected: !!(sc && sc.ws) }, seatAv({ token: t, name: (sc && sc.name) || 'Igrač' }), su ? { kvPts: ACC.kvizOf(su).pts } : {});
   });
   const from = t => kr.members.indexOf(t);
   return {
@@ -566,6 +589,8 @@ function kvrView(kr, token) {
   };
 }
 function kvrBroadcast(kr) {
+  // bodovi se upišu na račun prije slanja, da svatko odmah vidi novi zbroj
+  kvPay(kr.game, kr.game.krugNo + ':' + kr.game.qi, i => { const c = clients.get(kr.members[i]); return c && c.uid; });
   for (const t of kr.members) { const c = clients.get(t); if (c && c.ws && c.kvRoom === kr.id) send(c.ws, kvrView(kr, t)); }
 }
 function kvrStop(kr) { clearTimeout(kr.timer); kr.timer = null; kr.due = null; }
@@ -585,13 +610,13 @@ function kvrSchedule(kr) {
 // kraj kruga: prijavljenima koji su bili barem pola kruga upiše se partija (online)
 function kvrStats(kr) {
   const res = kr.game.result;
-  if (!res || kr.members.length < 2) return;
+  if (!res) return;
   kr.members.forEach((t, i) => {
     const c = clients.get(t), sc = res.scores[i];
     const u = c && c.uid && ACC.user(c.uid);
-    if (!u || !sc || sc.seen < res.total / 2) return;
-    ACC.record(u, 'online', 'kviz', res.winners.includes(i) ? (res.winners.length > 1 ? 'd' : 'w') : 'l');
-    pushAccount(u.id);
+    if (!u) return;
+    if (kr.members.length >= 2 && sc && sc.seen >= res.total / 2) ACC.record(u, 'online', 'kviz', res.winners.includes(i) ? (res.winners.length > 1 ? 'd' : 'w') : 'l');
+    pushAccount(u.id); // i skupljeni kviz bodovi
   });
 }
 function kvrJoin(token, id) {
@@ -703,7 +728,7 @@ function accountMsg(u, c, withImg) {
   const fv = friendsView(u, c);
   return {
     type: 'account', storage: ACC.kind,
-    user: Object.assign({ id: u.id, uname: u.uname, name: u.name, av: u.av, cm: u.cm, stats: u.stats, chips: ACC.chipsOf(u), refills: u.refills || 0, chipsLast: u.chipsLast || null, lobbyAdmin: isAdmin(u), admin: isAppAdmin(u), tempPass: !!u.tempPass }, withImg ? { img: u.img } : {}),
+    user: Object.assign({ id: u.id, uname: u.uname, name: u.name, av: u.av, cm: u.cm, stats: u.stats, chips: ACC.chipsOf(u), refills: u.refills || 0, chipsLast: u.chipsLast || null, lobbyAdmin: isAdmin(u), admin: isAppAdmin(u), tempPass: !!u.tempPass, kviz: ACC.kvizOf(u) }, withImg ? { img: u.img } : {}),
     friends: fv.list, imgs: fv.imgs,
   };
 }
@@ -1003,6 +1028,7 @@ wss.on('connection', (ws, req) => {
     const err = msg => send(ws, { type: 'error', msg });
     if (LOBBY_MSGS.has(m.type)) return lobbyMessage(m, c, ws);
     if (m.type === 'kvList') { c.kvList = !m.off; if (c.kvList) send(ws, kvListMsg()); return; }
+    if (m.type === 'kvTop') return send(ws, kvTopMsg(c, m.cat));
     if (c.kvRoom && KVR_MSGS.has(m.type)) return kvrMessage(m, token, c, ws);
     if (ACCOUNT_MSGS.has(m.type)) {
       if (!ACC.isReady()) return m.type === 'login' || m.type === 'register' ? send(ws, { type: 'authError', msg: 'Računi trenutno nisu dostupni (baza se spaja). Pokušaj za minutu.' }) : undefined;

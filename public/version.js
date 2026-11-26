@@ -7,6 +7,7 @@
 // test/version.js provjerava da se broj slaže s package.json.
 (function () {
   const NOTES = [
+    { v: '1.17.0', d: '2026-11-26', t: 'Kviz: bodovi iz online kvizova skupljaju se na računu (i po kategorijama), uz ljestvicu najboljih.' },
     { v: '1.16.0', d: '2026-11-26', t: 'Povijest zadnjih 20 online partija, potez po potez. Admin može dati privremenu lozinku igraču koji je zaboravi.' },
     { v: '1.15.0', d: '2026-11-26', t: 'Kviz: stalne sobe (Miješano i po kategorijama) u koje se ulazi bilo kad, i pitanja na pisanje.' },
     { v: '1.14.0', d: '2026-11-26', t: 'Nova igra: kviz Znalac (414 pitanja, 3 runde, brži točan odgovor nosi više bodova), s botovima ili online.' },

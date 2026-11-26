@@ -6,6 +6,7 @@
   const P = window.PokerEngine, PB = window.PokerBot, TR = window.Turnir;
   const CJ = window.CovjeceEngine, CB = window.CovjeceBot;
   const KV = window.KvizEngine, KVB = window.KvizBot, KVS = window.KvizSlike;
+  const SH = window.Shop;
   const engOf = k => k === 'treseta' ? T : k === 'poker' ? P : k === 'covjece' ? CJ : k === 'kviz' ? KV : E;
   const botOf = k => k === 'treseta' ? TB : k === 'poker' ? PB : k === 'covjece' ? CB : k === 'kviz' ? KVB : B;
   // u pokeru, Čovječe i kvizu svatko igra za sebe (i u četvero); "Chi fa meno" postoji samo za briškulu i trešetu
@@ -77,8 +78,14 @@
   const botCm = () => 1 + Math.floor(Math.random() * CM_MAX);
   function avatar(seat, cls, extra) {
     if (!seat) return `<span class="av ${cls || ''} empty"></span>`;
-    return `<span class="av ${cls || ''}">${AV.inner(seat.av, imgCache, seat.name)}${seat.cm ? `<span class="cmb" title="Dužina pišulinca">${seat.cm}<small>cm</small></span>` : ''}${extra || ''}</span>`;
+    // ukrasi iz trgovine: okvir (klasa fr-…) i značka u kutu
+    const cos = seat.cos || {}, fr = SH.BY_ID[cos.fr], bd = SH.BY_ID[cos.bd];
+    return `<span class="av ${cls || ''}${fr ? ' fr ' + fr.id.replace('_', '-') : ''}">${AV.inner(seat.av, imgCache, seat.name)}${seat.cm ? `<span class="cmb" title="Dužina pišulinca">${seat.cm}<small>cm</small></span>` : ''}${bd ? `<span class="avbd" title="${esc(bd.name)}">${bd.v}</span>` : ''}${extra || ''}</span>`;
   }
+  // titula iz trgovine (uz ime)
+  const tiHtml = cos => { const t = cos && SH.BY_ID[cos.ti]; return t ? `<span class="ti">${esc(t.name)}</span>` : ''; };
+  // moji ukrasi (vide se i u igri protiv botova)
+  const myCos = () => { const eq = loggedIn() && acc.user.eq || {}, o = {}; for (const k of ['fr', 'bd', 'ti']) if (eq[k]) o[k] = eq[k]; return o; };
 
   // ---------- korisnički račun (nije obavezan: bez prijave se igra kao gost) ----------
   const acc = { user: null, friends: [], storage: null, err: '', tab: 'login', busy: false, hist: null, game: null, reset: null };
@@ -98,6 +105,13 @@
     if (m.storage) acc.storage = m.storage;
     const was = acc.user;
     acc.user = m.user; acc.friends = m.friends || [];
+    // zarađeni dukati: kratka obavijest (samo za nove, ne kod svakog osvježavanja)
+    const dl = m.user && m.user.dukLast;
+    if (dl && dl.t > (store.get('dukSeen', 0) || 0)) {
+      store.set('dukSeen', dl.t);
+      if (Date.now() - dl.t < 60000) setTimeout(() => toast(`+${dl.n} ${SH.cur(dl.n)} · ${dl.why}`), was ? 600 : 1500);
+    }
+    applyTheme();
     if (!was !== !m.user) kvTopAt = 0; // prijava/odjava: ljestvicu treba osvježiti (gost ↔ račun)
     if (dm.with && !acc.friends.some(f => f.id === dm.with && f.status === 'ok')) dm.with = null;
     else if (dm.with && m.user && 'img' in m.user) net.send({ type: 'dmOpen', id: dm.with }); // nova veza: dohvati propušteno
@@ -150,12 +164,14 @@
     ctrl = getNet(); ctrl.send(profileMsg()); ctrl.send({ type: 'join', code });
   }
   // partija protiv botova: rezultat se javi serveru za statistiku (samo kad je igrač prijavljen)
-  function reportBotGame(kind, low, res, mode) {
-    if (loggedIn() && net) net.send({ type: 'stat', kind, low: !!low, res, mode });
+  function reportBotGame(kind, low, res, mode, level) {
+    if (loggedIn() && net) net.send({ type: 'stat', kind, low: !!low, res, mode, level });
   }
   // žetoni na računu (poker): 5.000
   const fmtChips = n => Math.round(+n || 0).toLocaleString('hr-HR');
   const walletHtml = n => `<span class="wallet" title="Žetoni na računu">🪙 ${fmtChips(n)}</span>`;
+  // dukati (valuta za trgovinu)
+  const dukHtml = n => `<span class="duk" title="Dukati"><i class="dk"></i>${fmtChips(n)}</span>`;
   function agoText(t) {
     if (!t) return '';
     const m = Math.round((Date.now() - t) / 60000);
@@ -239,7 +255,7 @@
     view() {
       return {
         type: 'room', local: true, code: null, mode: this.mode, level: this.level, low: this.low, kind: this.kind, target: this.target, host: true, you: 0, wins: this.wins, tour: this.tour,
-        seats: this.names.map((n, i) => ({ name: n, bot: i > 0, connected: true, av: i ? this.avs[i] : myAv(), cm: i ? this.cms[i] : S.cm })),
+        seats: this.names.map((n, i) => ({ name: n, bot: i > 0, connected: true, av: i ? this.avs[i] : myAv(), cm: i ? this.cms[i] : S.cm, cos: i ? null : myCos() })),
         game: this.E.viewFor(this.st, 0), signals: this.signals.slice(-6),
       };
     }
@@ -250,7 +266,7 @@
         this.counted = true;
         if (!st.result.draw) this.wins[sideOf(this.kind, this.mode, st.result.winners[0])]++;
         if (this.tour && !this.tour.done) TR.record(this.tour, this.kind, st.result);
-        reportBotGame(this.kind, this.low, st.result.draw ? 'd' : st.result.winners.includes(0) ? 'w' : 'l', this.mode);
+        reportBotGame(this.kind, this.low, st.result.draw ? 'd' : st.result.winners.includes(0) ? 'w' : 'l', this.mode, this.level);
         if (this.tour && this.tour.done) {
           const sd = TR.standings(this.tour);
           reportBotGame('turnir', false, sd.every(x => x.place === 1) ? 'd' : sd.find(x => x.p === 0).place === 1 ? 'w' : 'l');
@@ -306,7 +322,7 @@
     leave() {
       clearTimeout(this.timer); this.kvStop();
       // poker napušten prije kraja: ulog je izgubljen (kao i online)
-      if (this.kind === 'poker' && this.st.phase !== 'over' && !this.counted) { this.counted = true; reportBotGame('poker', false, 'l', this.mode); }
+      if (this.kind === 'poker' && this.st.phase !== 'over' && !this.counted) { this.counted = true; reportBotGame('poker', false, 'l', this.mode, this.level); }
     }
   }
 
@@ -730,7 +746,7 @@
       const isF = id => acc.friends.some(f => f.id === id && f.status === 'ok');
       const ids = lobby.who.slice().sort((a, b) => (b === me) - (a === me) || isF(b) - isF(a) || lobbyUser(a).name.localeCompare(lobbyUser(b).name, 'hr'));
       list.innerHTML = `<p class="muted lc-who-head">Online: ${lobby.who.length} ${lobby.who.length === 1 ? 'prijavljeni' : 'prijavljenih'}${lobby.guests ? ` i ${lobby.guests} ${lobby.guests === 1 ? 'gost' : 'gostiju'}` : ''}</p>
-        <ul class="lc-who">${ids.map(id => { const u = lobbyUser(id); return `<li><button class="lc-u" data-lu="${id}">${avatar({ av: u.av, name: u.name, cm: 0 }, 'xs', '<span class="pres on"></span>')}<b>${esc(u.name)}</b>${id === me ? ' <span class="muted">(ti)</span>' : isF(id) ? ' <span class="tag">prijatelj</span>' : ''}</button></li>`; }).join('')}</ul>
+        <ul class="lc-who">${ids.map(id => { const u = lobbyUser(id); return `<li><button class="lc-u" data-lu="${id}">${avatar({ av: u.av, name: u.name, cm: 0, cos: u.cos }, 'xs', '<span class="pres on"></span>')}<b>${esc(u.name)}</b>${tiHtml(u.cos)}${id === me ? ' <span class="muted">(ti)</span>' : isF(id) ? ' <span class="tag">prijatelj</span>' : ''}</button></li>`; }).join('')}</ul>
         <p class="muted lc-who-head">Klikni na ime da dodaš prijatelja ili pozoveš u igru.</p>`;
       return;
     }
@@ -739,7 +755,7 @@
         const u = lobbyUser(x.f), mine = x.f === me;
         const del = mine || admin ? `<button class="lc-del" data-lc="del" data-id="${x.id}" aria-label="Obriši poruku" title="Obriši">✕</button>` : '';
         const join = x.code ? `<button class="small lc-join" data-lc="rjoin" data-code="${esc(x.code)}"${room && room.code === x.code ? ' disabled' : ''}>${room && room.code === x.code ? 'Tvoja soba ' : 'Uđi u sobu '}${esc(x.code)}</button>` : '';
-        return `<div class="msg ${mine ? 'mine' : ''}"><div class="who"><button class="lc-u" data-lu="${u.id}">${avatar({ av: u.av, name: u.name, cm: 0 }, 'xs')}${mine ? 'Ti' : esc(u.name)}</button> <span class="t">${dmTime(x.at)}</span>${del}</div><div class="txt">${esc(x.t)}${join}</div></div>`;
+        return `<div class="msg ${mine ? 'mine' : ''}"><div class="who"><button class="lc-u" data-lu="${u.id}">${avatar({ av: u.av, name: u.name, cm: 0, cos: u.cos }, 'xs')}${mine ? 'Ti' : esc(u.name)}${tiHtml(u.cos)}</button> <span class="t">${dmTime(x.at)}</span>${del}</div><div class="txt">${esc(x.t)}${join}</div></div>`;
       }).join('') : '<p class="muted chat-empty">Još nema poruka. Pozdravi sve koji su online!</p>';
     if (atBottom || (lobby.msgs.length && lobby.msgs[lobby.msgs.length - 1].f === me)) list.scrollTop = list.scrollHeight;
   }
@@ -788,7 +804,7 @@
       <div class="panel profile">
         <h2 class="desk-only">Igrač</h2>
         <div class="prof-row">
-          <button class="av-pick" id="avBtn" aria-label="Odaberi avatar">${avatar({ av: myAv(), name: S.name }, 'lg')}<span class="pen">✎</span></button>
+          <button class="av-pick" id="avBtn" aria-label="Odaberi avatar">${avatar({ av: myAv(), name: S.name, cos: myCos() }, 'lg')}<span class="pen">✎</span></button>
           <input id="name" maxlength="20" placeholder="Tvoje ime" value="${esc(S.name)}">
         </div>
         <div class="cm-row">
@@ -898,7 +914,7 @@
         <h2>Igrači</h2>
         <ul class="seats">${r.seats.map((s, i) => `<li>
           ${avatar(s, 'md')}
-          <span class="n">${s ? esc(s.name) + (i === r.you ? ' (ti)' : '') : '<span class="muted">čeka se igrač…</span>'}${s && s.cm ? `<span class="cmt">Dužina pišulinca: ${s.cm} cm</span>` : ''}${s && s.wallet != null && (r.kind === 'poker' || r.tour) ? `<span class="cmt">${walletHtml(s.wallet)}</span>` : ''}</span>
+          <span class="n">${s ? esc(s.name) + (i === r.you ? ' (ti)' : '') + ' ' + tiHtml(s.cos) : '<span class="muted">čeka se igrač…</span>'}${s && s.cm ? `<span class="cmt">Dužina pišulinca: ${s.cm} cm</span>` : ''}${s && s.wallet != null && (r.kind === 'poker' || r.tour) ? `<span class="cmt">${walletHtml(s.wallet)}</span>` : ''}</span>
           ${r.mode === 4 && !solo(r.kind) ? `<span class="tag team${i % 2}">${i % 2 ? 'Par B' : 'Par A'}</span>` : ''}
           ${r.kind === 'covjece' ? `<span class="cj-dot c${CJ.COLORS[r.mode][i]}" title="${CJ.COLOR_NAMES[CJ.COLORS[r.mode][i]]}"></span>` : ''}
           ${s && s.bot ? '<span class="tag">bot</span>' : ''}
@@ -1993,12 +2009,13 @@
 
   // ---------- račun: red u izborniku i prozori ----------
   function accountRow() {
-    if (!loggedIn()) return `<div class="acc-row guest"><span class="muted">Igraš kao gost</span><button class="small" id="accBtn">Prijava / registracija</button></div>`;
+    if (!loggedIn()) return `<div class="acc-row guest"><span class="muted">Igraš kao gost</span><span class="row-btns"><button class="ghost small" id="shopBtn" title="Trgovina">🛒</button><button class="small" id="accBtn">Prijava / registracija</button></span></div>`;
     const fc = friendCounts();
     return `<div class="acc-row">
       <button class="ghost small" id="accBtn" title="Račun">👤 ${esc(acc.user.uname)}</button>
       <button class="ghost small" id="statsBtn">📊 Statistika</button>
       <button class="ghost small" id="walletBtn" title="Žetoni na računu (poker)">${walletHtml(acc.user.chips)}</button>
+      <button class="ghost small" id="shopBtn" title="Trgovina (dukati)">🛒 ${dukHtml(acc.user.duk)}</button>
       <button class="ghost small" id="friendsBtn">👥 Prijatelji${fc.on ? ` <span class="on-n">${fc.on}</span>` : ''}${fc.req + fc.msg ? `<span class="badge">${fc.req + fc.msg > 9 ? '9+' : fc.req + fc.msg}</span>` : ''}</button>
     </div>`;
   }
@@ -2007,13 +2024,14 @@
     const st = $app.querySelector('#statsBtn'); if (st) st.onclick = () => { modal = 'stats'; net && net.send({ type: 'account' }); render(); };
     const wb = $app.querySelector('#walletBtn'); if (wb) wb.onclick = () => { modal = 'stats'; net && net.send({ type: 'account' }); render(); };
     const fr = $app.querySelector('#friendsBtn'); if (fr) fr.onclick = () => { modal = 'friends'; render(); };
+    const sb = $app.querySelector('#shopBtn'); if (sb) sb.onclick = () => { modal = 'shop'; net && net.send({ type: 'account' }); render(); };
   }
   const storageNote = () => acc.storage && acc.storage !== 'postgres' ? '<p class="warn">Server još nema spojenu bazu, pa se računi mogu izgubiti kod restarta servera.</p>' : '';
   function accountHtml() {
     if (loggedIn()) {
       const u = acc.user;
       return `<h2>Moj račun</h2>
-        <div class="acc-head">${avatar({ av: myAv(), name: S.name, cm: S.cm }, 'lg')}<div><b>${esc(S.name || u.name)}</b><div class="muted">korisničko ime: ${esc(u.uname)}</div></div></div>
+        <div class="acc-head">${avatar({ av: myAv(), name: S.name, cm: S.cm, cos: myCos() }, 'lg')}<div><b>${esc(S.name || u.name)}</b> ${tiHtml(myCos())}<div class="muted">korisničko ime: ${esc(u.uname)}</div></div></div>
         <p class="muted">Ime, avatar i dužina pišulinca spremaju se u račun, pa ih imaš na svakom uređaju gdje se prijaviš. Prijatelji te dodaju po korisničkom imenu.</p>
         ${storageNote()}
         ${u.tempPass ? '<p class="warn">Prijavljen/a si s <b>privremenom lozinkom</b> koju ti je dao admin. Promijeni je ispod (stara lozinka = privremena).</p>' : ''}
@@ -2054,6 +2072,72 @@
       <p class="muted">Bodovi iz svih online kvizova (stalne sobe i sobe s prijateljima) zbrajaju se na računu. Točnih odgovora: ${k.ok} od ${k.n}${k.n ? ` (${Math.round(100 * k.ok / k.n)}%)` : ''}.</p>
       <table class="scores stats"><tr><th>Kategorija</th><th>Točnih</th><th>Bodovi</th></tr>${rows}</table>`;
   }
+  // ---------- trgovina ----------
+  const shop = { tab: 'fr' };
+  // osobne teme (stol, poleđina karata) – iz računa; zapamte se i u pregledniku da se odmah vide kod otvaranja
+  function applyTheme() {
+    const eq = loggedIn() ? acc.user.eq || {} : {};
+    const tb = eq.tb || '', kb = eq.kb || '';
+    store.set('theme', { tb, kb });
+    paintTheme(tb, kb);
+  }
+  function paintTheme(tb, kb) {
+    document.body.className = document.body.className.replace(/\btb-\S+/g, '').trim();
+    if (tb) document.body.classList.add(tb.replace('_', '-'));
+    if (Art.setBack) Art.setBack(kb ? kb.slice(3) : '');
+  }
+  { const t = store.get('theme', null); if (t) paintTheme(t.tb, t.kb); }
+  function shopPreview(it) {
+    const me = { av: myAv(), name: S.name };
+    if (it.slot === 'fr') return avatar(Object.assign(me, { cos: { fr: it.id } }), 'md');
+    if (it.slot === 'bd') return `<span class="sh-big">${it.v}</span>`;
+    if (it.slot === 'ti') return `<span class="ti big">${esc(it.name)}</span>`;
+    if (it.slot === 'tb') return `<span class="sh-tb ${it.id.replace('_', '-')}"></span>`;
+    if (it.slot === 'kb') return `<span class="sh-kb">${Art.backOf(it.id.slice(3))}</span>`;
+    return '';
+  }
+  function shopHtml() {
+    const u = acc.user, E$ = SH.EARN;
+    const inv = new Set(u ? u.inv || [] : []), eq = u ? u.eq || {} : {};
+    const slot = SH.SLOTS.find(x => x.id === shop.tab) || SH.SLOTS[0];
+    const items = SH.ITEMS.filter(it => it.slot === slot.id);
+    const cards = items.map(it => {
+      const own = inv.has(it.id), on = eq[it.slot] === it.id;
+      const btn = !u ? '' : on ? `<button class="ghost small" data-unequip="${it.slot}">Skini</button>`
+        : own ? `<button class="small" data-equip="${it.id}">Stavi</button>`
+        : `<button class="small" data-buy="${it.id}" ${u.duk < it.price ? 'disabled' : ''}>${dukHtml(it.price)}</button>`;
+      return `<li class="sh-it ${on ? 'on' : ''} ${own ? 'own' : ''}"><div class="sh-pv">${shopPreview(it)}</div><div class="sh-nm">${esc(it.name)}</div>
+        <div class="sh-st">${on ? '✓ Na tebi' : own ? 'Kupljeno' : ''}</div>${btn}</li>`;
+    }).join('');
+    const prev = u ? `<div class="sh-me">${avatar({ av: myAv(), name: S.name, cos: myCos() }, 'lg')}<div><b>${esc(S.name || u.name)}</b> ${tiHtml(myCos())}<div class="muted">Ovako te vide drugi igrači</div></div></div>` : '';
+    return `<h2>🛒 Trgovina</h2>
+      ${u ? `<div class="wallet-box"><div>Tvoji dukati</div><b>${dukHtml(u.duk)}</b></div>` : '<p class="warn">Trgovina je za prijavljene igrače: dukati se skupljaju na računu. Prijavi se ili napravi račun (besplatno).</p>'}
+      ${prev}
+      <div class="seg sh-tabs" data-seg="shopTab">${SH.SLOTS.map(x => `<button class="${x.id === slot.id ? 'on' : ''}" data-v="${x.id}">${x.icon} ${x.name}</button>`).join('')}</div>
+      <p class="muted" style="margin:0 0 8px">${esc(slot.desc)}</p>
+      <ul class="sh-grid">${cards}</ul>
+      <details class="pw"><summary>Kako se zarađuju dukati?</summary>
+        <ul class="sh-earn">
+          <li>Online pobjeda: <b>${E$.onlineWin}</b>, neriješeno ${E$.onlineDraw}, poraz ${E$.onlineLoss} (ako odigraš do kraja)</li>
+          <li>Pobjeda u online turniru: još <b>+${E$.tourWin}</b></li>
+          <li>Online kviz (krug u sobi): pobjeda ${E$.kvizWin}, sudjelovanje ${E$.kvizPlay}</li>
+          <li>Protiv botova: pobjeda ${E$.botWin.easy} / ${E$.botWin.normal} / ${E$.botWin.hard} (lako / srednje / teško), poraz ${E$.botLoss}, najviše ${E$.botDay} na dan</li>
+          <li>Dnevni bonus: <b>${E$.daily}</b> za prvu prijavu u danu</li>
+        </ul>
+        <p class="muted">Dukati su odvojeni od žetona za poker i ne mogu se kupiti pravim novcem.</p>
+      </details>
+      <div class="row" style="margin-top:12px">${u ? '' : '<button class="ghost" id="shopLogin">Prijava</button>'}<button id="close">Zatvori</button></div>`;
+  }
+  function bindShop(el) {
+    el.querySelectorAll('[data-seg="shopTab"] button').forEach(b => b.onclick = () => { shop.tab = b.dataset.v; render(); });
+    el.querySelectorAll('[data-buy]').forEach(b => b.onclick = () => {
+      const it = SH.BY_ID[b.dataset.buy];
+      if (it && window.confirm(`Kupiti „${it.name}” za ${it.price} ${SH.cur(it.price)}?`)) net.send({ type: 'shopBuy', id: it.id });
+    });
+    el.querySelectorAll('[data-equip]').forEach(b => b.onclick = () => { const it = SH.BY_ID[b.dataset.equip]; net.send({ type: 'shopEquip', slot: it.slot, id: it.id }); });
+    el.querySelectorAll('[data-unequip]').forEach(b => b.onclick = () => net.send({ type: 'shopEquip', slot: b.dataset.unequip, id: null }));
+    const sl = el.querySelector('#shopLogin'); if (sl) sl.onclick = () => { acc.err = ''; modal = 'account'; render(); };
+  }
   function statsHtml() {
     const st = (acc.user && acc.user.stats) || {};
     const table = (sec, title) => {
@@ -2072,6 +2156,7 @@
       ${acc.user ? '<button class="ghost" id="histBtn" style="width:100%;margin-bottom:10px">🕘 Povijest partija (tko je što odigrao)</button>' : ''}
       ${acc.user ? `<div class="wallet-box"><div>Žetoni za poker</div><b>${walletHtml(acc.user.chips)}</b></div>
       <p class="muted">Svaka partija pokera košta ulog od ${fmtChips(P.START_CHIPS)} žetona, a na kraju ti se na račun vrati ono s čim završiš (pobjednik dobije žetone svih igrača za stolom). Ako napustiš partiju prije kraja, gubiš ulog. Tko padne ispod ${fmtChips(1000)} žetona, dobije besplatnu dopunu do ${fmtChips(1000)}${acc.user.refills ? ` (dosad dopunjeno ${acc.user.refills}×)` : ''}.</p>` : ''}
+      ${acc.user ? `<div class="wallet-box"><div>Dukati (za trgovinu)</div><b>${dukHtml(acc.user.duk)}</b></div>` : ''}
       ${acc.user ? kvizStatsHtml(acc.user.kviz) : ''}
       ${table('online', 'Online (s drugim igračima)')}
       ${table('bots', 'Protiv botova')}
@@ -2130,7 +2215,7 @@
       let btn = '';
       if (f.at.open && f.at.code) btn = `<button class="ghost small" data-sjoin="${esc(f.at.code)}" title="Uđi u njegovu/njezinu sobu">Pridruži se</button>`;
       if (!busy) btn += `<button class="small" data-sinv="${f.id}">Pozovi</button>`;
-      return `<li class="${busy ? 'busy' : ''}">${avatar({ av: f.av, name: f.name, cm: 0 }, 'md', '<span class="pres on"></span>')}
+      return `<li class="${busy ? 'busy' : ''}">${avatar({ av: f.av, name: f.name, cm: 0, cos: f.cos }, 'md', '<span class="pres on"></span>')}
         <span class="n"><b>${esc(f.name)}</b><span class="sub">${esc(friendWhere(f))}</span></span>
         <span class="sf-btns"><button class="ghost small msg-btn" data-smsg="${f.id}" aria-label="Poruka">💬${f.unread ? `<span class="badge">${f.unread > 9 ? '9+' : f.unread}</span>` : ''}</button>${btn}</span></li>`;
     };
@@ -2164,8 +2249,8 @@
         if (f.unread) sub = f.unread === 1 ? 'Nova poruka' : f.unread + (f.unread < 5 ? ' nove poruke' : ' novih poruka');
         btns += `<button class="ghost small" data-frem="${f.id}" data-fname="${esc(f.name)}" aria-label="Ukloni">✕</button>`;
       }
-      return `<li class="${f.at ? 'online' : ''}${f.unread ? ' unread' : ''}">${avatar({ av: f.av, name: f.name, cm: 0 }, 'md', f.status === 'ok' ? `<span class="pres ${f.at ? 'on' : ''}"></span>` : '')}
-        <span class="n"><b>${esc(f.name)}</b> <span class="muted">${esc(f.uname)}</span><span class="sub">${esc(sub)}</span></span>${btns}</li>`;
+      return `<li class="${f.at ? 'online' : ''}${f.unread ? ' unread' : ''}">${avatar({ av: f.av, name: f.name, cm: 0, cos: f.cos }, 'md', f.status === 'ok' ? `<span class="pres ${f.at ? 'on' : ''}"></span>` : '')}
+        <span class="n"><b>${esc(f.name)}</b> ${tiHtml(f.cos)} <span class="muted">${esc(f.uname)}</span><span class="sub">${esc(sub)}</span></span>${btns}</li>`;
     };
     return `<h2>Prijatelji</h2>
       <form id="fAdd" class="row" autocomplete="off"><input id="fName" maxlength="20" placeholder="Korisničko ime prijatelja" autocapitalize="off" spellcheck="false"><button type="submit" style="flex:0 0 auto">Dodaj</button></form>
@@ -2351,6 +2436,7 @@
     else if (modal === 'notes') html = notesHtml();
     else if (modal === 'account') html = accountHtml();
     else if (modal === 'stats') html = statsHtml();
+    else if (modal === 'shop') html = shopHtml();
     else if (modal === 'history') html = acc.game ? gameLogHtml(acc.game) : historyHtml();
     else if (modal === 'friends') html = friendsHtml();
     else if (modal === 'avatar') {
@@ -2384,6 +2470,7 @@
     if (admOpen) { const d = el.querySelector('details.admin'); if (d) d.open = true; }
     if (scroll) el.querySelector('.modal').scrollTop = scroll;
     bindAccountModal(el, !!focus);
+    if (modal === 'shop') bindShop(el);
     if (focus) { const f = el.querySelector('#' + focus); if (f) f.focus(); }
     const c = el.querySelector('#close'); if (c) c.onclick = () => { modal = null; render(); };
     const sp = el.querySelector('#sp'); if (sp) sp.onchange = () => { S.showPoints = sp.checked; save(); render(); };

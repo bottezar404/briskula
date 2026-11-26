@@ -324,18 +324,28 @@
     backDia += `M${x},${y - 3.5}L${x + 3.5},${y}L${x},${y + 3.5}L${x - 3.5},${y}Z`;
     backDots += `M${x - 0.9},${y}a.9,.9 0 1,0 1.8,0a.9,.9 0 1,0 -1.8,0`;
   }
-  function back() {
+  // boje poleđine (trgovina): [podloga, uzorak, rub i točkice, romb]
+  const BACKS = {
+    '': ['#173d84', '#2d62c4', null, null],
+    crvena: ['#7d1620', '#b3303a', null, null],
+    zelena: ['#144a2c', '#2a7a4a', null, null],
+    crna: ['#141414', '#2b2b2b', '#e5c77a', '#8a6d1f'],
+  };
+  function back(v) {
+    const [bg, pat, y0, r0] = BACKS[v] || BACKS[''];
+    const y = y0 || Y, rr = r0 || R;
     return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 160" class="card-svg">
       <defs><clipPath id="bc"><rect x="6" y="6" width="88" height="148" rx="3"/></clipPath></defs>
       <rect x=".6" y=".6" width="98.8" height="158.8" rx="8" fill="${W}" stroke="#bdbdbd" stroke-width="1.2"/>
-      <g clip-path="url(#bc)"><rect x="6" y="6" width="88" height="148" fill="#173d84"/>
-        <path d="${backDia}" fill="#2d62c4"/><path d="${backDots}" fill="${Y}"/></g>
+      <g clip-path="url(#bc)"><rect x="6" y="6" width="88" height="148" fill="${bg}"/>
+        <path d="${backDia}" fill="${pat}"/><path d="${backDots}" fill="${y}"/></g>
       <rect x="6" y="6" width="88" height="148" rx="3" fill="none" stroke="${K}" stroke-width=".7"/>
-      <rect x="10" y="10" width="80" height="140" rx="2" fill="none" stroke="${Y}" stroke-width="1.2"/>
-      <path d="M50,58 L72,80 L50,102 L28,80 Z" fill="${R}" stroke="${Y}" stroke-width="2"/>
-      <circle cx="50" cy="80" r="8" fill="${Y}" stroke="${K}" stroke-width=".8"/><circle cx="50" cy="80" r="3.5" fill="${R}"/>
+      <rect x="10" y="10" width="80" height="140" rx="2" fill="none" stroke="${y}" stroke-width="1.2"/>
+      <path d="M50,58 L72,80 L50,102 L28,80 Z" fill="${rr}" stroke="${y}" stroke-width="2"/>
+      <circle cx="50" cy="80" r="8" fill="${y}" stroke="${K}" stroke-width=".8"/><circle cx="50" cy="80" r="3.5" fill="${rr}"/>
     </svg>`;
   }
+  let backV = '';
 
   function suitIcon(s) {
     if (s === 'dinari') return coin(0, 0, 13);
@@ -359,7 +369,9 @@
 
   root.CardArt = {
     face: c => asImg(c, face(c)),
-    back: () => asImg('back', back()),
+    back: () => asImg('back:' + backV, back(backV)),
+    backOf: v => asImg('back:' + v, back(v)),
+    setBack: v => { backV = BACKS[v] ? v : ''; },
     suit: s => FR_COL[s] ? `<svg viewBox="-1.2 -1.2 2.4 2.4" class="suit-svg"><path d="${FR_PATH[s]}" fill="${FR_COL[s]}"/></svg>` : `<svg viewBox="-16 -16 32 32" class="suit-svg">${suitIcon(s)}</svg>`,
   };
 })(typeof self !== 'undefined' ? self : this);

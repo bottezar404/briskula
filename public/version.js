@@ -7,6 +7,7 @@
 // test/version.js provjerava da se broj slaže s package.json.
 (function () {
   const NOTES = [
+    { v: '1.12.0', d: '2026-11-26', t: 'Nova igra: Čovječe ne ljuti se (2–4 igrača, s botovima ili online s prijateljima).' },
     { v: '1.11.3', d: '2026-11-26', t: 'Bolja sigurnost stranice (sigurnosna zaglavlja, CSP, HSTS) i server se više ne može srušiti neispravnim linkom.' },
     { v: '1.11.2', d: '2026-11-26', t: 'Popravljena preklapanja tekstova u igri na mobitelu i PC-u.' },
     { v: '1.11.1', d: '2026-11-26', t: 'Kod online prijatelja piše u kojoj su igri (i kad igraju protiv botova).' },

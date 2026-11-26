@@ -242,9 +242,64 @@
       <rect x="20" y="136" width="60" height="4" fill="${Y}" stroke="${K}" stroke-width=".6"/>`;
   }
 
+  // ---------- obične (francuske) karte za poker: pik, herc, karo, tref ----------
+  // znakovi boja nacrtani kao oblici (ne kao slova), da izgledaju isto na svakom uređaju
+  const FR_RED = '#d0202a', FR_BLACK = '#161616';
+  const FR_COL = { pik: FR_BLACK, tref: FR_BLACK, herc: FR_RED, karo: FR_RED };
+  const FR_PATH = {
+    herc: 'M0,.95 C-.5,.5 -1.05,.1 -1.05,-.4 C-1.05,-.82 -.75,-1 -.5,-1 C-.25,-1 -.07,-.85 0,-.62 C.07,-.85 .25,-1 .5,-1 C.75,-1 1.05,-.82 1.05,-.4 C1.05,.1 .5,.5 0,.95Z',
+    karo: 'M0,-1.05 L.78,0 L0,1.05 L-.78,0Z',
+    pik: 'M0,-1.05 C-.5,-.55 -1.05,-.2 -1.05,.25 C-1.05,.62 -.78,.8 -.52,.8 C-.32,.8 -.15,.7 -.07,.55 C-.1,.78 -.2,.95 -.38,1.05 L.38,1.05 C.2,.95 .1,.78 .07,.55 C.15,.7 .32,.8 .52,.8 C.78,.8 1.05,.62 1.05,.25 C1.05,-.2 .5,-.55 0,-1.05Z',
+    tref: 'M-0.41,-0.52 a0.41,0.41 0 1,0 0.82,0 a0.41,0.41 0 1,0 -0.82,0 M-0.91,0.16 a0.41,0.41 0 1,0 0.82,0 a0.41,0.41 0 1,0 -0.82,0 M0.09,0.16 a0.41,0.41 0 1,0 0.82,0 a0.41,0.41 0 1,0 -0.82,0 M-.09,.1 C-.1,.6 -.2,.9 -.4,1.05 L.4,1.05 C.2,.9 .1,.6 .09,.1Z',
+  };
+  const frPip = (s, x, y, size, flip) => `<path d="${FR_PATH[s]}" fill="${FR_COL[s]}" transform="translate(${x} ${y}) scale(${size})${flip ? ' rotate(180)' : ''}"/>`;
+  const FR_RANK = { 11: 'J', 12: 'Q', 13: 'K', 14: 'A' };
+  // raspored znakova na kartama 2–10 (x, y); donja polovica se okreće naopako
+  const C1 = 33, C2 = 50, C3 = 67, Y1 = 34, Y5 = 126;
+  const FR_POS = {
+    2: [[C2, Y1], [C2, Y5]],
+    3: [[C2, Y1], [C2, 80], [C2, Y5]],
+    4: [[C1, Y1], [C3, Y1], [C1, Y5], [C3, Y5]],
+    5: [[C1, Y1], [C3, Y1], [C2, 80], [C1, Y5], [C3, Y5]],
+    6: [[C1, Y1], [C3, Y1], [C1, 80], [C3, 80], [C1, Y5], [C3, Y5]],
+    7: [[C1, Y1], [C3, Y1], [C2, 57], [C1, 80], [C3, 80], [C1, Y5], [C3, Y5]],
+    8: [[C1, Y1], [C3, Y1], [C2, 57], [C1, 80], [C3, 80], [C2, 103], [C1, Y5], [C3, Y5]],
+    9: [[C1, Y1], [C3, Y1], [C1, 64.7], [C3, 64.7], [C2, 80], [C1, 95.3], [C3, 95.3], [C1, Y5], [C3, Y5]],
+    10: [[C1, Y1], [C3, Y1], [C2, 49], [C1, 64.7], [C3, 64.7], [C1, 95.3], [C3, 95.3], [C2, 111], [C1, Y5], [C3, Y5]],
+  };
+  // dečko, dama, kralj: okvir u boji, veliko slovo i jednostavna kruna/šešir (vlastiti crtež)
+  function frFigure(s, r) {
+    const col = FR_COL[s], tint = col === FR_RED ? '#fbe3e4' : '#e6e9f0';
+    const hat = r === 13
+      ? `<path d="M36,62 L36,46 L43,54 L50,42 L57,54 L64,46 L64,62 Z" fill="${Y}" stroke="${K}" stroke-width="1"/><circle cx="50" cy="42" r="2.4" fill="${R}"/>`
+      : r === 12
+        ? `<path d="M38,62 Q50,40 62,62 Z" fill="${Y}" stroke="${K}" stroke-width="1"/><circle cx="50" cy="49" r="2.6" fill="${BL}"/>`
+        : `<path d="M37,62 L40,50 Q50,44 60,50 L63,62 Z" fill="${col === FR_RED ? BL : R}" stroke="${K}" stroke-width="1"/><path d="M60,50 Q68,44 66,56" fill="none" stroke="${Y}" stroke-width="2.4"/>`;
+    return `<rect x="24" y="30" width="52" height="100" rx="4" fill="${tint}" stroke="${col}" stroke-width="1.6"/>
+      ${hat}
+      <text x="50" y="100" font-size="38" font-weight="700" text-anchor="middle" font-family="Georgia,'Times New Roman',serif" fill="${col}">${FR_RANK[r]}</text>
+      ${frPip(s, 50, 116, 7)}`;
+  }
+  function frenchFace(s, r) {
+    const col = FR_COL[s];
+    let center;
+    if (r === 14) center = frPip(s, 50, 80, 22);
+    else if (r >= 11) center = frFigure(s, r);
+    else center = FR_POS[r].map(([x, y]) => frPip(s, x, y, 8.5, y > 80)).join('');
+    const lab = FR_RANK[r] || String(r);
+    // velika oznaka u kutu: dobro se čita i na malim kartama
+    const idx = `<text x="12" y="24" font-size="${r === 10 ? 17 : 21}" font-weight="700" text-anchor="middle" font-family="Arial,Helvetica,sans-serif" fill="${col}"${r === 10 ? ' letter-spacing="-1.5"' : ''}>${lab}</text>${frPip(s, 12, 35, 6.2)}`;
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 160" class="card-svg">
+      <rect x=".6" y=".6" width="98.8" height="158.8" rx="8" fill="${W}" stroke="#bdbdbd" stroke-width="1.2"/>
+      <g>${center}</g>
+      ${idx}<g transform="rotate(180 50 80)">${idx}</g>
+    </svg>`;
+  }
+
   // ---------- karta ----------
   function face(cardId) {
     const [s, rs] = cardId.split('-'); const r = +rs;
+    if (FR_COL[s]) return frenchFace(s, r);
     let center;
     if (r === 1) center = ace(s);
     else if (r >= 11) center = figure(s, r);
@@ -305,6 +360,6 @@
   root.CardArt = {
     face: c => asImg(c, face(c)),
     back: () => asImg('back', back()),
-    suit: s => `<svg viewBox="-16 -16 32 32" class="suit-svg">${suitIcon(s)}</svg>`,
+    suit: s => FR_COL[s] ? `<svg viewBox="-1.2 -1.2 2.4 2.4" class="suit-svg"><path d="${FR_PATH[s]}" fill="${FR_COL[s]}"/></svg>` : `<svg viewBox="-16 -16 32 32" class="suit-svg">${suitIcon(s)}</svg>`,
   };
 })(typeof self !== 'undefined' ? self : this);

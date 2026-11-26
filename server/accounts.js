@@ -1,6 +1,7 @@
 /* Korisnički računi: registracija, prijava, profil, statistika i prijatelji.
  * Zapisi u pohrani (store.js):
- *   user:<id>   { id, uname, name, pass, av, img, cm, stats, friends: { <id>: 'ok'|'out'|'in' }, created, seen }
+ *   user:<id>   { id, uname, name, pass, av, img, cm, stats, friends: { <id>: 'ok'|'out'|'in' }, created, seen,
+ *                 chips, refills, chipsLast: { d, t, refill } }   (žetoni za poker; chips nema dok se prvi put ne igra)
  *   sess:<hash> { uid, t }   (hash = sha256 tokena; sam token zna samo preglednik)
  *   dm:<a>:<b>  { seq, m: [{ id, f, t, at }], r: { <uid>: id zadnje pročitane } }   (a < b; direktne poruke među prijateljima)
  */
@@ -9,7 +10,10 @@ const crypto = require('crypto');
 
 const UNAME_RE = /^[\p{L}\p{N}_.-]{3,20}$/u;
 const PASS_MIN = 6, PASS_MAX = 100, FRIENDS_MAX = 200;
-const DM_KEEP = 200; // koliko zadnjih poruka po razgovoru se čuva
+const DM_KEEP = 200;
+// žetoni za poker: svaki račun počinje s WALLET_START; partija pokera košta ulog (žetoni za stolom),
+// a nakon partije se na račun vraća ono s čim je igrač završio. Tko padne ispod WALLET_MIN, dobije dopunu do WALLET_MIN.
+const WALLET_START = 5000, WALLET_MIN = 1000; // koliko zadnjih poruka po razgovoru se čuva
 // vrste igara u statistici
 const STAT_KEYS = ['briskula', 'briskula_meno', 'treseta', 'treseta_meno', 'poker', 'turnir'];
 const statKey = (kind, low) => kind === 'poker' || kind === 'turnir' ? kind : (kind === 'treseta' ? 'treseta' : 'briskula') + (low ? '_meno' : '');
@@ -111,6 +115,19 @@ function create(store) {
       save(u);
     },
 
+    // ---------- žetoni (poker) ----------
+    chipsOf: u => (u && Number.isFinite(u.chips) ? u.chips : WALLET_START),
+    /** promjena stanja žetona nakon partije pokera; vraća novo stanje */
+    addChips(u, d) {
+      d = Math.round(+d || 0);
+      let chips = api.chipsOf(u) + d, refill = false;
+      if (chips < WALLET_MIN) { chips = WALLET_MIN; refill = true; u.refills = (u.refills || 0) + 1; }
+      u.chips = chips;
+      u.chipsLast = { d, t: Date.now(), refill };
+      save(u);
+      return chips;
+    },
+
     // ---------- prijatelji ----------
     /** zahtjev za prijateljstvo; ako je drugi već poslao zahtjev, odmah ste prijatelji */
     befriend(u, uname) {
@@ -182,4 +199,4 @@ function create(store) {
   return api;
 }
 
-module.exports = { create, STAT_KEYS, statKey };
+module.exports = { create, STAT_KEYS, statKey, WALLET_START, WALLET_MIN };

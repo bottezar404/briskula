@@ -662,8 +662,35 @@ details.pw summary { cursor: pointer; padding: 6px 0; color: var(--gold); font-w
 #invite:not([hidden]) ~ #dmNote:not([hidden]), #dmNote:not([hidden]) ~ #invite:not([hidden]) { top: calc(92px + env(safe-area-inset-top)); }
 /* mobitel: status uvijek u jednom redu; kad se prelomio u 2 reda (online, dugo ime + timer) išao je preko špila i rezultata */
 @media (max-width: 899px) { .status { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 6px; font-size: 14px; } .deck, .has-left .deck { bottom: 30px; } }
-/* mobitel, poker u četvero: igrač gore zauzme cijelu širinu, pa bočni igrači i stol idu malo niže */
+/* ---------- žetoni na računu (poker) ---------- */
+.wallet { white-space: nowrap; font-weight: 700; color: var(--gold); font-variant-numeric: tabular-nums; }
+.wallet-box { display: flex; align-items: center; justify-content: center; gap: 10px; flex-wrap: wrap; margin: 10px 0 6px; padding: 8px 12px; border-radius: 10px; background: rgba(0,0,0,.22); }
+.wallet-box > div { opacity: .8; font-size: 14px; }
+.wallet-box b { font-size: 18px; }
+.wallet-box .plus { color: #9be59b; font-weight: 800; }
+.wallet-box .minus { color: #ff9b8f; font-weight: 800; }
+.pblinds .wallet { font-size: 11px; }
 @media (max-width: 899px) {
-  .mode4.poker .seat.left, .mode4.poker .seat.right { top: calc(var(--sw) * 1.6 + 62px); }
-  .mode4.poker .pboard { top: 61%; }
+  /* poker u četvero na mobitelu: imena i žetoni se ne preklapaju */
+  .mode4.poker .nameplate { font-size: 13px; padding: 3px 8px; gap: 4px; max-width: 47vw; }
+  .mode4.poker .seat.top .nameplate { max-width: 46vw; }
+  .mode4.poker .seat.top { gap: 5px; }
+  .mode4.poker .seat.top .pbet { position: absolute; left: 50%; top: 100%; transform: translateX(-50%); margin-top: 2px; }
+  .mode4.poker .seat.left, .mode4.poker .seat.right { max-width: 49vw; }
 }
+@media (max-width: 899px) {
+  .mode4.poker .seat.left, .mode4.poker .seat.right { top: calc(var(--sw) * 1.6 + 74px); }
+}
+@media (max-width: 899px) and (max-height: 700px) {
+  .mode4.poker .pboard { top: 63%; }
+}
+
+/* ---------- broj verzije i "Što je novo" ---------- */
+.ver { text-align: center; margin: 6px 0 0; }
+button.linkish { background: none; color: inherit; padding: 4px 8px; font-size: 12px; font-weight: 400; opacity: .55; text-decoration: underline; text-underline-offset: 2px; }
+button.linkish:hover { opacity: .85; }
+ul.notes { list-style: none; padding: 0; margin: 0 0 14px; max-height: 60vh; overflow-y: auto; text-align: left; }
+ul.notes li { padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,.1); font-size: 14px; }
+ul.notes li:last-child { border-bottom: 0; }
+ul.notes li .muted { font-size: 12px; margin-left: 6px; }
+ul.notes li div { margin-top: 2px; }

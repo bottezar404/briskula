@@ -107,7 +107,7 @@
     }
     if (!was && m.user && modal === 'account') modal = null;
     acc.busy = false;
-    if (!room || modal || !room.game) render();
+    if (!room || modal || !room.game || room.game.phase === 'over') render();
   }
   function friendCounts() {
     const ok = acc.friends.filter(f => f.status === 'ok');
@@ -135,9 +135,12 @@
     ctrl = getNet(); ctrl.send(profileMsg()); ctrl.send({ type: 'join', code });
   }
   // partija protiv botova: rezultat se javi serveru za statistiku (samo kad je igrač prijavljen)
-  function reportBotGame(kind, low, res) {
-    if (loggedIn() && net) net.send({ type: 'stat', kind, low: !!low, res });
+  function reportBotGame(kind, low, res, mode) {
+    if (loggedIn() && net) net.send({ type: 'stat', kind, low: !!low, res, mode });
   }
+  // žetoni na računu (poker): 5.000
+  const fmtChips = n => Math.round(+n || 0).toLocaleString('hr-HR');
+  const walletHtml = n => `<span class="wallet" title="Žetoni na računu">🪙 ${fmtChips(n)}</span>`;
   function agoText(t) {
     if (!t) return '';
     const m = Math.round((Date.now() - t) / 60000);
@@ -226,7 +229,7 @@
         this.counted = true;
         if (!st.result.draw) this.wins[sideOf(this.kind, this.mode, st.result.winners[0])]++;
         if (this.tour && !this.tour.done) TR.record(this.tour, this.kind, st.result);
-        reportBotGame(this.kind, this.low, st.result.draw ? 'd' : st.result.winners.includes(0) ? 'w' : 'l');
+        reportBotGame(this.kind, this.low, st.result.draw ? 'd' : st.result.winners.includes(0) ? 'w' : 'l', this.mode);
         if (this.tour && this.tour.done) {
           const sd = TR.standings(this.tour);
           reportBotGame('turnir', false, sd.every(x => x.place === 1) ? 'd' : sd.find(x => x.p === 0).place === 1 ? 'w' : 'l');
@@ -261,7 +264,11 @@
       this.emit();
     }
     rematch() { this.start(); }
-    leave() { clearTimeout(this.timer); }
+    leave() {
+      clearTimeout(this.timer);
+      // poker napušten prije kraja: ulog je izgubljen (kao i online)
+      if (this.kind === 'poker' && this.st.phase !== 'over' && !this.counted) { this.counted = true; reportBotGame('poker', false, 'l', this.mode); }
+    }
   }
 
   // ---------- online veza ----------
@@ -542,7 +549,7 @@
   const KIND_DESC = {
     briskula: 'Klasična briškula: pobjeđuje tko skupi više bodova.',
     treseta: 'Trešeta: bez briškule, mora se odgovoriti na boju. Igra se u više ruku, do zadanog broja bodova.',
-    poker: 'Poker (Texas Hold\'em) s kartama briškule: 2 karte u ruci, 5 na stolu, ulaže se žetonima. Pobjeđuje tko pokupi sve žetone.',
+    poker: 'Poker (Texas Hold\'em) s običnim kartama (52 karte): 2 karte u ruci, 5 na stolu, ulaže se žetonima. Pobjeđuje tko pokupi sve žetone. Prijavljenima se žetoni pamte na računu.',
     turnir: 'Turnir: tri igre zaredom, <b>briškula → trešeta → poker</b>. U svakoj igri dobiješ bod za svakog protivnika kojeg nadigraš; pobjeđuje tko na kraju ima najviše bodova. U četvero se briškula i trešeta igraju u parovima, a poker svatko za sebe.',
   };
   function kindDesc(kind, low) {
@@ -657,7 +664,7 @@
         <h2>Igrači</h2>
         <ul class="seats">${r.seats.map((s, i) => `<li>
           ${avatar(s, 'md')}
-          <span class="n">${s ? esc(s.name) + (i === r.you ? ' (ti)' : '') : '<span class="muted">čeka se igrač…</span>'}${s && s.cm ? `<span class="cmt">Dužina pišulinca: ${s.cm} cm</span>` : ''}</span>
+          <span class="n">${s ? esc(s.name) + (i === r.you ? ' (ti)' : '') : '<span class="muted">čeka se igrač…</span>'}${s && s.cm ? `<span class="cmt">Dužina pišulinca: ${s.cm} cm</span>` : ''}${s && s.wallet != null && (r.kind === 'poker' || r.tour) ? `<span class="cmt">${walletHtml(s.wallet)}</span>` : ''}</span>
           ${r.mode === 4 && r.kind !== 'poker' ? `<span class="tag team${i % 2}">${i % 2 ? 'Par B' : 'Par A'}</span>` : ''}
           ${s && s.bot ? '<span class="tag">bot</span>' : ''}
           ${s && !s.bot && !s.connected ? '<span class="tag">odspojen</span>' : ''}
@@ -677,7 +684,7 @@
           ${seg('roomTime', TURN_OPTS, r.turnTime || 0)}
           <p class="muted" style="margin-top:-4px">${turnTimeDesc(r.turnTime)}</p>`
         : r.tour ? `<p class="muted">${KIND_DESC.turnir} Trešeta se igra do ${r.target}.</p>`
-        : r.kind === 'poker' ? `<p class="muted">Igra se <b>poker</b> (Texas Hold'em s kartama briškule).</p>`
+        : r.kind === 'poker' ? `<p class="muted">Igra se <b>poker</b> (Texas Hold'em s običnim kartama). Ulog je ${P.START_CHIPS} žetona s računa${loggedIn() ? '' : ' (gosti igraju bez računa)'}.</p>`
         : r.kind === 'treseta' ? `<p class="muted">Igra se <b>trešeta</b>${r.low ? ' ' + LOW_NAME + ' (pobjeđuje tko ima manje)' : ''} do ${r.target} bodova.</p>`
         : r.low ? `<p class="muted">Igra se <b>${LOW_NAME}</b>: pobjeđuje tko skupi manje bodova.</p>` : ''}
         ${!r.host || r.isPublic ? `<p class="muted">${turnTimeDesc(r.turnTime)}</p>` : ''}
@@ -1032,7 +1039,7 @@
       </div>`;
     const blinds = `<div class="tscore pblinds"><div class="muted">Ruka ${g.handNo}</div>
         <div class="ts"><span>Blindovi</span><b>${g.sb}/${g.bb}</b></div>
-        <div class="muted">${g.blindsIn === 1 ? 'rastu od sljedeće ruke' : 'rastu za ' + g.blindsIn + ' ruke'}</div></div>`;
+        <div class="muted">${g.blindsIn === 1 ? 'rastu od sljedeće ruke' : 'rastu za ' + g.blindsIn + ' ruke'}</div>${loggedIn() && acc.user.chips != null ? `<div class="muted" title="Žetoni na računu">Račun ${walletHtml(acc.user.chips)}</div>` : ''}</div>`;
 
     // poruka
     let status = '';
@@ -1156,19 +1163,30 @@
     return `<div class="result-big">${title}</div>
       ${res.forfeit != null ? forfeitNote(g, res) : `<p class="muted" style="text-align:center">${esc(g.players[res.winners[0]].name)} je pokupio/la sve žetone (${res.hands.length} ruku).</p>`}
       <table class="scores">${rows}</table>
+      ${pokerWalletNote(g)}
       ${r.tour ? '' : `<p class="muted" style="text-align:center">${tally}</p>`}
       ${tourTable(r)}${againHtml(r, canRestart)}
       <div class="row" style="margin-top:8px">${!r.local && r.host ? '<button class="ghost" id="lobby">Natrag u sobu</button>' : ''}<button class="ghost" id="out">Izlaz</button></div>`;
   }
+  // poker: stanje žetona na računu nakon partije (prijavljeni) ili poziv na prijavu (gost)
+  function pokerWalletNote(g) {
+    if (window.BRK_OFFLINE) return '';
+    if (!loggedIn()) return '<p class="muted" style="text-align:center">Igraš kao gost, pa se žetoni ne pamte. Prijavi se i tvoji žetoni ostaju na računu.</p>';
+    const u = acc.user, cl = u.chipsLast;
+    const fresh = cl && Date.now() - cl.t < 120000;
+    const d = fresh ? cl.d : null;
+    return `<div class="wallet-box"><div>Žetoni na računu</div><b>${walletHtml(u.chips)}</b>${d != null ? `<span class="${d > 0 ? 'plus' : d < 0 ? 'minus' : ''}">${d > 0 ? '+' + fmtChips(d) : d < 0 ? '−' + fmtChips(-d) : '±0'}</span>` : ''}</div>
+      ${fresh && cl.refill ? `<p class="muted" style="text-align:center">Ostao/la si skoro bez žetona, pa ti je račun dopunjen na ${fmtChips(u.chips)}.</p>` : ''}`;
+  }
   function pokerRulesHtml() {
     return `<div class="rules"><h2>Pravila pokera</h2>
-      <p>Igra se <b>Texas Hold'em</b> s 40 karata briškule. Za poker je redoslijed <b>2, 3, 4, 5, 6, 7, fanat, konj, kralj, as</b> (fanat je kao dečko, konj kao dama). As može biti i najniži (skala A-2-3-4-5), a 7-fanat-konj-kralj-as je najviša skala.</p>
+      <p>Igra se <b>Texas Hold'em</b> s običnim špilom od <b>52 karte</b>: pik ♠, herc ♥, karo ♦ i tref ♣. Redoslijed od najslabije: <b>2, 3, 4, 5, 6, 7, 8, 9, 10, J (dečko), Q (dama), K (kralj), A (as)</b>. As može biti i najniži (skala A-2-3-4-5).</p>
       <ul>
         <li>Svatko dobije <b>2 karte</b>. Na stol se otvaraju 3 karte (flop), pa jedna (turn) i još jedna (river). Najbolja ruka od 5 karata (od svojih 2 i 5 na stolu) nosi lonac.</li>
         <li>Svi počinju s <b>${P.START_CHIPS} žetona</b>. Dvojica lijevo od djelitelja (D) ulažu mali i veliki blind, koji <b>rastu svakih ${P.BLIND_EVERY} ruku</b>.</li>
         <li>Na potezu možeš <b>odustati</b>, <b>provjeriti</b> (kad nema uloga), <b>pratiti</b> ili <b>povisiti</b> (bez limita, do all-ina). Tko ostane bez žetona, ispada. Pobjeđuje zadnji sa žetonima.</li>
-        <li><b>Jačina ruku</b> (od najslabije): visoka karta, par, dva para, <b>skala</b>, <b>tris</b>, <b>ful</b>, <b>boja</b>, poker (četiri iste), skala u boji.</li>
-        <li>Jer u špilu nema 8, 9 i 10, skala je češća od trisa, a ful češći od boje, pa je ovdje <b>tris jači od skale</b>, a <b>boja jača od fula</b> (kao u „short deck” pokeru).</li>
+        <li><b>Jačina ruku</b> (od najslabije): visoka karta, par, dva para, tris, skala (5 zaredom), boja (5 iste boje), ful (tris + par), poker (četiri iste), skala u boji. Najjača je kraljevska skala u boji (10-J-Q-K-A iste boje).</li>
+        <li><b>Žetoni na računu:</b> prijavljenim igračima partija košta ulog od ${P.START_CHIPS} žetona, a na kraju im se na račun vrati ono s čim završe. Gosti igraju bez računa.</li>
         <li>U online igri, tko ne odigra na vrijeme provjeri (ako može) ili odustane od te ruke.</li>
       </ul>
       <button id="close" style="width:100%">Zatvori</button></div>`;
@@ -1219,12 +1237,14 @@
     return `<div class="acc-row">
       <button class="ghost small" id="accBtn" title="Račun">👤 ${esc(acc.user.uname)}</button>
       <button class="ghost small" id="statsBtn">📊 Statistika</button>
+      <button class="ghost small" id="walletBtn" title="Žetoni na računu (poker)">${walletHtml(acc.user.chips)}</button>
       <button class="ghost small" id="friendsBtn">👥 Prijatelji${fc.on ? ` <span class="on-n">${fc.on}</span>` : ''}${fc.req + fc.msg ? `<span class="badge">${fc.req + fc.msg > 9 ? '9+' : fc.req + fc.msg}</span>` : ''}</button>
     </div>`;
   }
   function bindAccountRow() {
     const a = $app.querySelector('#accBtn'); if (a) a.onclick = () => { acc.err = ''; modal = 'account'; render(); };
     const st = $app.querySelector('#statsBtn'); if (st) st.onclick = () => { modal = 'stats'; net && net.send({ type: 'account' }); render(); };
+    const wb = $app.querySelector('#walletBtn'); if (wb) wb.onclick = () => { modal = 'stats'; net && net.send({ type: 'account' }); render(); };
     const fr = $app.querySelector('#friendsBtn'); if (fr) fr.onclick = () => { modal = 'friends'; render(); };
   }
   const storageNote = () => acc.storage && acc.storage !== 'postgres' ? '<p class="warn">Server još nema spojenu bazu, pa se računi mogu izgubiti kod restarta servera.</p>' : '';
@@ -1274,6 +1294,8 @@
     };
     return `<h2>Statistika</h2>
       <p class="muted" style="text-align:center;margin-top:-4px">${esc(acc.user ? acc.user.uname : '')}</p>
+      ${acc.user ? `<div class="wallet-box"><div>Žetoni za poker</div><b>${walletHtml(acc.user.chips)}</b></div>
+      <p class="muted">Svaka partija pokera košta ulog od ${fmtChips(P.START_CHIPS)} žetona, a na kraju ti se na račun vrati ono s čim završiš (pobjednik dobije žetone svih igrača za stolom). Ako napustiš partiju prije kraja, gubiš ulog. Tko padne ispod ${fmtChips(1000)} žetona, dobije besplatnu dopunu do ${fmtChips(1000)}${acc.user.refills ? ` (dosad dopunjeno ${acc.user.refills}×)` : ''}.</p>` : ''}
       ${table('online', 'Online (s drugim igračima)')}
       ${table('bots', 'Protiv botova')}
       <p class="muted">Turnir se broji kao jedna partija (pobjeda = prvo mjesto), a njegove igre se broje i pod briškulom, trešetom i pokerom. Tko napusti online partiju prije kraja, upiše mu se poraz.</p>

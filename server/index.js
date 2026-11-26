@@ -184,6 +184,7 @@ function leaveCurrent(token) {
   const i = seatOf(r, token);
   if (i < 0) return;
   if (r.game && r.game.phase !== 'over') {
+    chipsLeave(r, i);
     // tijekom igre bot preuzima mjesto
     const p = seatAv(r.seats[i]);
     r.seats[i] = { bot: true, name: r.seats[i].name + ' (bot)', av: p.av, cm: p.cm };
@@ -220,7 +221,13 @@ function roomView(r, token) {
   const you = seatOf(r, token);
   const g = r.game;
   const c = clients.get(token);
-  const seats = r.seats.map(s => s ? Object.assign({ name: s.name, bot: !!s.bot, connected: s.bot || !!(clients.get(s.token) && clients.get(s.token).ws) }, seatAv(s)) : null);
+  const seats = r.seats.map(s => {
+    if (!s) return null;
+    const sc = !s.bot && clients.get(s.token);
+    const su = sc && sc.uid && ACC.user(sc.uid);
+    // prijavljeni igrači: stanje žetona na računu (vidi se u sobi)
+    return Object.assign({ name: s.name, bot: !!s.bot, connected: s.bot || !!(sc && sc.ws) }, su ? { wallet: ACC.chipsOf(su) } : {}, seatAv(s));
+  });
   const imgs = newImgs(c, seats.map(s => s && s.av));
   const tl = turnLeft(r);
   return {
@@ -266,12 +273,15 @@ function startGame(r) {
   // tko je za stolom s računom (za statistiku; tko izađe usred partije, upiše mu se poraz)
   r.uids = r.seats.map(s => { const c = !s.bot && clients.get(s.token); return c && c.uid || null; });
   r.humans = r.seats.filter(s => !s.bot).length;
+  // poker: žetoni s računa (ulog = početni žetoni za stolom), obračun na kraju partije
+  r.chipUids = r.kind === 'poker' ? r.uids.slice() : null;
   broadcast(r); schedule(r);
   return true;
 }
 
 // ---------- statistika ----------
 function recordStats(r, g) {
+  if (g.result) settleChips(r, g);
   if (!r.uids || !g.result) return;
   const res = g.result;
   const section = r.humans >= 2 ? 'online' : 'bots';
@@ -289,6 +299,26 @@ function recordStats(r, g) {
     pushAccount(uid);
   });
   r.uids = null; // jednom po partiji
+}
+
+// poker: na račun ide razlika između žetona na kraju i uloga (početnih žetona za stolom)
+function settleChips(r, g) {
+  if (!r.chipUids || g.kind !== 'poker') return;
+  r.chipUids.forEach((uid, i) => {
+    const u = uid && ACC.user(uid);
+    if (!u) return;
+    ACC.addChips(u, g.players[i].chips - g.startChips);
+    pushAccount(uid);
+  });
+  r.chipUids = null;
+}
+// tko napusti poker usred partije, gubi ulog (njegove žetone za stolom dalje igra bot)
+function chipsLeave(r, i) {
+  const uid = r.chipUids && r.chipUids[i];
+  if (!uid || !r.game || r.game.phase === 'over') return;
+  r.chipUids[i] = null;
+  const u = ACC.user(uid);
+  if (u) { ACC.addChips(u, -r.game.startChips); pushAccount(uid); }
 }
 
 // timer za potez vrijedi samo kad su za stolom barem dva čovjeka
@@ -444,7 +474,7 @@ function accountMsg(u, c, withImg) {
   const fv = friendsView(u, c);
   return {
     type: 'account', storage: ACC.kind,
-    user: Object.assign({ id: u.id, uname: u.uname, name: u.name, av: u.av, cm: u.cm, stats: u.stats }, withImg ? { img: u.img } : {}),
+    user: Object.assign({ id: u.id, uname: u.uname, name: u.name, av: u.av, cm: u.cm, stats: u.stats, chips: ACC.chipsOf(u), refills: u.refills || 0, chipsLast: u.chipsLast || null }, withImg ? { img: u.img } : {}),
     friends: fv.list, imgs: fv.imgs,
   };
 }
@@ -572,8 +602,12 @@ function accountMessage(m, token, c, ws, ip) {
       if (!['w', 'l', 'd'].includes(m.res)) return;
       c.statAt = c.statAt || {};
       const now = Date.now();
-      if (now - (c.statAt[key] || 0) < STAT_GAP) return;
+      // poker protiv botova: poraz = izgubljen ulog, pobjeda = ulozi svih botova (iznos računa server, ne klijent)
+      const bank = key === 'poker' && [2, 3, 4].includes(m.mode) && m.res !== 'd';
+      if (bank && m.res === 'l') ACC.addChips(u, -P.START_CHIPS);
+      if (now - (c.statAt[key] || 0) < STAT_GAP) { if (bank && m.res === 'l') pushAccount(u.id); return; }
       c.statAt[key] = now;
+      if (bank && m.res === 'w') ACC.addChips(u, (m.mode - 1) * P.START_CHIPS);
       ACC.record(u, 'bots', key, m.res);
       pushAccount(u.id);
       return;

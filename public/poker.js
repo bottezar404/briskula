@@ -1,14 +1,10 @@
-/* Poker (Texas Hold'em) s 40 karata briškule – pravila (dijeli se između preglednika i servera)
+/* Poker (Texas Hold'em) s običnim špilom od 52 karte – pravila (dijeli se između preglednika i servera)
  *
- * Karte: kupe, dinari, špade, bate; brojevi 2–7, fanat, konj, kralj, as.
- * Redoslijed za poker: 2 3 4 5 6 7 F C K A (fanat = dečko, konj = dama, kralj = kralj).
+ * Karte: pik ♠, herc ♥, karo ♦, tref ♣; brojevi 2–10, dečko (J), dama (Q), kralj (K), as (A).
+ * Oznaka karte je "boja-broj", npr. 'herc-14' (as herc), 'pik-11' (dečko pik).
  * As može biti i najniža karta (skala A-2-3-4-5).
  *
- * Jer u špilu nema 8, 9 i 10, neke kombinacije su rjeđe nego u običnom pokeru.
- * Na 7 karata (2 u ruci + 5 na stolu) izračunato:
- *   skala ~10 %, tris ~7 %, ful ~6 %, boja ~2,5 %
- * pa je poredak (od najslabije): visoka karta, par, dva para, SKALA, TRIS, FUL, BOJA, poker, skala u boji.
- * (Tris je jači od skale, a boja jača od fula – kao u "short deck" pokeru.)
+ * Standardni poredak ruku (od najslabije): visoka karta, par, dva para, tris, skala, boja, ful, poker, skala u boji.
  *
  * Igra se "No limit": svaki igrač počinje s istim brojem žetona, male i velike ulog (blindovi)
  * rastu svakih nekoliko ruku. Tko ostane bez žetona ispada; pobjeđuje zadnji koji ima žetone.
@@ -22,15 +18,13 @@
 })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
 
-  const SUITS = ['kupe', 'dinari', 'spade', 'bate'];
-  const RANKS = [1, 2, 3, 4, 5, 6, 7, 11, 12, 13];
-  // vrijednost za poker: 2..7, fanat 8, konj 9, kralj 10, as 11
-  const PV = { 2: 2, 3: 3, 4: 4, 5: 5, 6: 6, 7: 7, 11: 8, 12: 9, 13: 10, 1: 11 };
-  const PV_NAME = { 2: 'dvice', 3: 'trice', 4: 'četvorke', 5: 'petice', 6: 'šestice', 7: 'sedmice', 8: 'fanti', 9: 'konji', 10: 'kralji', 11: 'asovi' };
-  const PV_SHORT = { 2: '2', 3: '3', 4: '4', 5: '5', 6: '6', 7: '7', 8: 'F', 9: 'C', 10: 'K', 11: 'A' };
-  // kategorije, od najslabije
-  const CAT = ['Visoka karta', 'Par', 'Dva para', 'Skala', 'Tris', 'Ful', 'Boja', 'Poker', 'Skala u boji'];
-  const HIGH = 0, PAIR = 1, TWO = 2, STRAIGHT = 3, TRIPS = 4, FULL = 5, FLUSH = 6, QUADS = 7, SFLUSH = 8;
+  const SUITS = ['pik', 'herc', 'karo', 'tref'];
+  const RANKS = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]; // 11 dečko, 12 dama, 13 kralj, 14 as
+  const PV_NAME = { 2: 'dvice', 3: 'trice', 4: 'četvorke', 5: 'petice', 6: 'šestice', 7: 'sedmice', 8: 'osmice', 9: 'devetke', 10: 'desetke', 11: 'dečki', 12: 'dame', 13: 'kraljevi', 14: 'asovi' };
+  const PV_SHORT = { 2: '2', 3: '3', 4: '4', 5: '5', 6: '6', 7: '7', 8: '8', 9: '9', 10: '10', 11: 'J', 12: 'Q', 13: 'K', 14: 'A' };
+  // kategorije, od najslabije (standardni poker)
+  const CAT = ['Visoka karta', 'Par', 'Dva para', 'Tris', 'Skala', 'Boja', 'Ful', 'Poker', 'Skala u boji'];
+  const HIGH = 0, PAIR = 1, TWO = 2, TRIPS = 3, STRAIGHT = 4, FLUSH = 5, FULL = 6, QUADS = 7, SFLUSH = 8;
   const START_CHIPS = 1000;
   // blindovi (mali, veliki) – rastu svakih `blindEvery` ruku
   const BLINDS = [[10, 20], [15, 30], [25, 50], [40, 80], [60, 120], [100, 200], [150, 300], [250, 500], [400, 800], [600, 1200], [1000, 2000], [1500, 3000], [2500, 5000]];
@@ -38,7 +32,7 @@
 
   function card(s, r) { return s + '-' + r; }
   const INFO = Object.create(null);
-  for (const s of SUITS) for (const r of RANKS) INFO[card(s, r)] = { s, r, v: PV[r] };
+  for (const s of SUITS) for (const r of RANKS) INFO[card(s, r)] = { s, r, v: r };
   const suitOf = c => INFO[c].s, rankOf = c => INFO[c].r, pv = c => INFO[c].v;
   const FULL_DECK = Object.keys(INFO);
   function fullDeck() { return FULL_DECK.slice(); }
@@ -57,8 +51,8 @@
 
   // najviša karta skale iz skupa vrijednosti (bitmaska), 0 ako nema skale
   function straightTop(mask) {
-    if (mask & (1 << 11)) mask |= 1 << 1; // as kao jedinica
-    for (let top = 11; top >= 5; top--) {
+    if (mask & (1 << 14)) mask |= 1 << 1; // as kao jedinica
+    for (let top = 14; top >= 5; top--) {
       const need = 0b11111 << (top - 4);
       if ((mask & need) === need) return top;
     }
@@ -70,9 +64,9 @@
    * kategorija * 16^5 + do pet "kickera" po 4 bita.
    */
   function evaluate(cards) {
-    const cnt = new Array(12).fill(0);
-    const bySuit = { kupe: 0, dinari: 0, spade: 0, bate: 0 };
-    const suitN = { kupe: 0, dinari: 0, spade: 0, bate: 0 };
+    const cnt = new Array(15).fill(0);
+    const bySuit = { pik: 0, herc: 0, karo: 0, tref: 0 };
+    const suitN = { pik: 0, herc: 0, karo: 0, tref: 0 };
     let mask = 0;
     for (const c of cards) {
       const i = INFO[c];
@@ -80,30 +74,27 @@
       bySuit[i.s] |= 1 << i.v; suitN[i.s]++;
     }
     const enc = (cat, ks) => { let x = cat; for (let k = 0; k < 5; k++) x = x * 16 + (ks[k] || 0); return x; };
-    let best = -1;
+    const quads = [], trips = [], pairs = [];
+    for (let v = 14; v >= 2; v--) {
+      if (cnt[v] === 4) quads.push(v); else if (cnt[v] === 3) trips.push(v);
+      else if (cnt[v] === 2) pairs.push(v);
+    }
+    const kick = (excl, n) => { const out = []; for (let v = 14; v >= 2 && out.length < n; v--) if (cnt[v] && !excl.includes(v)) out.push(v); return out; };
     // skala u boji / boja
+    let flush = -1;
     for (const s of SUITS) if (suitN[s] >= 5) {
       const top = straightTop(bySuit[s]);
-      if (top) best = Math.max(best, enc(SFLUSH, [top]));
+      if (top) return enc(SFLUSH, [top]);
       const ks = [];
-      for (let v = 11; v >= 2 && ks.length < 5; v--) if (bySuit[s] & (1 << v)) ks.push(v);
-      best = Math.max(best, enc(FLUSH, ks));
+      for (let v = 14; v >= 2 && ks.length < 5; v--) if (bySuit[s] & (1 << v)) ks.push(v);
+      flush = Math.max(flush, enc(FLUSH, ks));
     }
-    const quads = [], trips = [], pairs = [], singles = [];
-    for (let v = 11; v >= 2; v--) {
-      if (cnt[v] === 4) quads.push(v); else if (cnt[v] === 3) trips.push(v);
-      else if (cnt[v] === 2) pairs.push(v); else if (cnt[v] === 1) singles.push(v);
-    }
-    const kick = (excl, n) => { const out = []; for (let v = 11; v >= 2 && out.length < n; v--) if (cnt[v] && !excl.includes(v)) out.push(v); return out; };
-    if (quads.length) best = Math.max(best, enc(QUADS, [quads[0]].concat(kick([quads[0]], 1))));
-    if (trips.length && (trips.length > 1 || pairs.length)) {
-      const t = trips[0], p = Math.max(trips[1] || 0, pairs[0] || 0);
-      best = Math.max(best, enc(FULL, [t, p]));
-    }
-    if (best >= 0) return best;
-    if (trips.length) return enc(TRIPS, [trips[0]].concat(kick([trips[0]], 2)));
+    if (quads.length) return enc(QUADS, [quads[0]].concat(kick([quads[0]], 1)));
+    if (trips.length && (trips.length > 1 || pairs.length)) return enc(FULL, [trips[0], Math.max(trips[1] || 0, pairs[0] || 0)]);
+    if (flush >= 0) return flush;
     const top = straightTop(mask);
     if (top) return enc(STRAIGHT, [top]);
+    if (trips.length) return enc(TRIPS, [trips[0]].concat(kick([trips[0]], 2)));
     if (pairs.length >= 2) return enc(TWO, [pairs[0], pairs[1]].concat(kick([pairs[0], pairs[1]], 1)));
     if (pairs.length) return enc(PAIR, [pairs[0]].concat(kick([pairs[0]], 3)));
     return enc(HIGH, kick([], 5));
@@ -121,7 +112,7 @@
       case FULL: return 'Ful (' + PV_NAME[k1] + ' na ' + PV_NAME[k2] + ')';
       case FLUSH: return 'Boja (do ' + PV_SHORT[k1] + ')';
       case QUADS: return 'Poker (' + PV_NAME[k1] + ')';
-      default: return k1 === 11 ? 'Kraljevska skala u boji' : 'Skala u boji do ' + (k1 === 5 ? '5' : PV_SHORT[k1]);
+      default: return k1 === 14 ? 'Kraljevska skala u boji' : 'Skala u boji do ' + (k1 === 5 ? '5' : PV_SHORT[k1]);
     }
   }
   // karte koje čine najbolju ruku (za isticanje na stolu)
@@ -427,7 +418,7 @@
   }
 
   return {
-    SUITS, RANKS, PV, CAT, BLINDS, START_CHIPS, BLIND_EVERY,
+    SUITS, RANKS, CAT, PV_SHORT, BLINDS, START_CHIPS, BLIND_EVERY,
     suitOf, rankOf, pv, strength, points, fullDeck, shuffle, evaluate, catOf, handName, bestFive,
     teamOf, newGame, legal, canPlay, play, collect, nextHand, viewFor, playerPoints, pot,
   };

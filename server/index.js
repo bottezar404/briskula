@@ -20,6 +20,7 @@ const KV = require('../public/kviz.js');
 const KB = require('../public/kviz-bot.js');
 const Store = require('./store.js');
 const Accounts = require('./accounts.js');
+const Shop = require('../public/shop.js');
 const History = require('./history.js');
 History.instrument([E, T, P, CJ, KV]); // povijest online partija (bilježi samo partije prijavljene s History.begin)
 const ACC = Accounts.create(Store.open());
@@ -181,7 +182,8 @@ function seatAv(s) {
   if (s.bot) return { av: s.av || AV.forName(s.name) };
   const c = clients.get(s.token);
   const u = c && c.uid && ACC.user(c.uid);
-  return Object.assign({ av: (c && c.av) || AV.forName(s.name) }, u ? { uname: u.uname, st: statOf(u) } : {});
+  const cos = u && ACC.cosOf(u);
+  return Object.assign({ av: (c && c.av) || AV.forName(s.name) }, u ? { uname: u.uname, st: statOf(u) } : {}, cos ? { cos } : {});
 }
 
 function createRoom(mode, host, opts) {
@@ -366,10 +368,20 @@ function recordStats(r, g) {
   r.uids.forEach((uid, i) => {
     const u = uid && ACC.user(uid);
     if (!u) return;
-    ACC.record(u, section, key, res.draw ? 'd' : res.winners.includes(i) ? 'w' : 'l', ms);
+    const out = res.draw ? 'd' : res.winners.includes(i) ? 'w' : 'l';
+    ACC.record(u, section, key, out, ms);
+    // dukati: tko je napustio partiju (umjesto njega igra bot) ili nije odigrao na vrijeme, ne dobiva ništa
+    const stayed = r.seats[i] && !r.seats[i].bot && res.forfeit !== i;
+    if (stayed) {
+      const E$ = Shop.EARN;
+      if (section === 'online') ACC.addDuk(u, out === 'w' ? E$.onlineWin : out === 'd' ? E$.onlineDraw : E$.onlineLoss, out === 'w' ? 'pobjeda' : out === 'd' ? 'neriješeno' : 'odigrana partija');
+      else ACC.addDuk(u, out === 'w' ? E$.botWin[r.level] || E$.botWin.normal : E$.botLoss, out === 'w' ? 'pobjeda protiv botova' : 'odigrana partija', true);
+    }
     if (st) {
       const firsts = st.filter(x => x.place === 1).length;
-      ACC.record(u, section, 'turnir', firsts === st.length ? 'd' : st.find(x => x.p === i).place === 1 ? 'w' : 'l');
+      const tw = firsts === st.length ? 'd' : st.find(x => x.p === i).place === 1 ? 'w' : 'l';
+      ACC.record(u, section, 'turnir', tw);
+      if (stayed && tw === 'w' && section === 'online') ACC.addDuk(u, Shop.EARN.tourWin, 'pobjeda u turniru');
     }
     pushAccount(uid);
   });
@@ -633,7 +645,11 @@ function kvrStats(kr) {
     const c = clients.get(t), sc = res.scores[i];
     const u = c && c.uid && ACC.user(c.uid);
     if (!u) return;
-    if (kr.members.length >= 2 && sc && sc.seen >= res.total / 2) ACC.record(u, 'online', 'kviz', res.winners.includes(i) ? (res.winners.length > 1 ? 'd' : 'w') : 'l');
+    if (kr.members.length >= 2 && sc && sc.seen >= res.total / 2) {
+      const out = res.winners.includes(i) ? (res.winners.length > 1 ? 'd' : 'w') : 'l';
+      ACC.record(u, 'online', 'kviz', out);
+      ACC.addDuk(u, out === 'l' ? Shop.EARN.kvizPlay : Shop.EARN.kvizWin, out === 'l' ? 'odigrani kviz' : 'pobjeda u kvizu');
+    }
     pushAccount(u.id); // i skupljeni kviz bodovi
   });
 }
@@ -700,6 +716,7 @@ function attach(token, c, u, sess) {
   if (!online.has(u.id)) online.set(u.id, new Set());
   online.get(u.id).add(token);
   ACC.touch(u);
+  ACC.daily(u); // prva prijava u danu: dnevni bonus (stiže s porukom o računu)
   presenceSoon();
 }
 function detach(token, c) {
@@ -739,7 +756,7 @@ function friendsView(u, c) {
     const av = f.av === 'img' && f.img ? 'i:' + storeImg(f.img) : f.av || AV.forName(f.name || f.uname);
     const ok = u.friends[fid] === 'ok';
     const dm = ok ? ACC.dmInfo(u.id, f.id) : null;
-    list.push({ id: f.id, uname: f.uname, name: f.name || f.uname, av, status: u.friends[fid], at: ok ? presenceOf(f.id) : null, seen: ok ? f.seen : null, unread: dm ? dm.unread : 0, last: dm ? dm.last : 0 });
+    list.push({ id: f.id, uname: f.uname, name: f.name || f.uname, av, cos: ACC.cosOf(f), status: u.friends[fid], at: ok ? presenceOf(f.id) : null, seen: ok ? f.seen : null, unread: dm ? dm.unread : 0, last: dm ? dm.last : 0 });
   }
   return { list, imgs: newImgs(c, list.map(f => f.av)) };
 }
@@ -747,7 +764,7 @@ function accountMsg(u, c, withImg) {
   const fv = friendsView(u, c);
   return {
     type: 'account', storage: ACC.kind,
-    user: Object.assign({ id: u.id, uname: u.uname, name: u.name, av: u.av, stats: u.stats, chips: ACC.chipsOf(u), refills: u.refills || 0, chipsLast: u.chipsLast || null, lobbyAdmin: isAdmin(u), admin: isAppAdmin(u), tempPass: !!u.tempPass, kviz: ACC.kvizOf(u) }, withImg ? { img: u.img } : {}),
+    user: Object.assign({ id: u.id, uname: u.uname, name: u.name, av: u.av, stats: u.stats, chips: ACC.chipsOf(u), refills: u.refills || 0, chipsLast: u.chipsLast || null, lobbyAdmin: isAdmin(u), admin: isAppAdmin(u), tempPass: !!u.tempPass, kviz: ACC.kvizOf(u), duk: ACC.dukOf(u), dukLast: u.dukLast || null, inv: ACC.invOf(u), eq: ACC.eqOf(u) }, withImg ? { img: u.img } : {}),
     friends: fv.list, imgs: fv.imgs,
   };
 }
@@ -824,7 +841,8 @@ function userCard(uid) {
   const u = ACC.user(uid);
   if (!u) return { id: uid, name: 'Igrač', uname: '', av: 'e0' };
   const av = u.av === 'img' && u.img ? 'i:' + storeImg(u.img) : u.av || AV.forName(u.name || u.uname);
-  return { id: u.id, name: u.name || u.uname, uname: u.uname, av };
+  const cos = ACC.cosOf(u);
+  return Object.assign({ id: u.id, name: u.name || u.uname, uname: u.uname, av }, cos ? { cos } : {});
 }
 // tko je online: prijavljeni (po računu) + broj gostiju (po vezi)
 function lobbyWho() {
@@ -988,6 +1006,16 @@ function accountMessage(m, token, c, ws, ip) {
       send(ws, { type: 'info', msg: 'Poziv poslan: ' + (f.name || f.uname) });
       return;
     }
+    case 'shopBuy': case 'shopEquip': {
+      if (!u) return err('Prijavi se da koristiš trgovinu.');
+      const res = m.type === 'shopBuy' ? ACC.buy(u, String(m.id || '')) : ACC.equip(u, String(m.slot || ''), m.id == null ? null : String(m.id));
+      if (res.error) return err(res.error);
+      if (res.item) send(ws, { type: 'info', msg: 'Kupljeno: ' + res.item.name + ' 🎉' });
+      pushAccount(u.id);
+      // novi okvir/značka/titula odmah se vide u sobi
+      for (const t of tokensOf(u.id)) { const tc = clients.get(t), tr = tc && tc.room && rooms.get(tc.room); if (tr) broadcast(tr); }
+      return;
+    }
     case 'stat': {
       // partija protiv botova u pregledniku (server je ne vidi, pa vjeruje klijentu)
       if (!u) return;
@@ -1003,12 +1031,14 @@ function accountMessage(m, token, c, ws, ip) {
       if (bank && m.res === 'w') ACC.addChips(u, (m.mode - 1) * P.START_CHIPS);
       ACC.record(u, 'bots', key, m.res, Math.min(+m.ms || 0, now - (c.botT || now)));
       c.botT = now; // sljedeća partija se broji od sad
+      const lv = ['easy', 'normal', 'hard'].includes(m.level) ? m.level : 'easy';
+      if (key !== 'turnir') ACC.addDuk(u, m.res === 'w' ? Shop.EARN.botWin[lv] : Shop.EARN.botLoss, m.res === 'w' ? 'pobjeda protiv botova' : 'odigrana partija', true);
       pushAccount(u.id);
       return;
     }
   }
 }
-const ACCOUNT_MSGS = new Set(['register', 'login', 'logout', 'account', 'password', 'friendAdd', 'friendAccept', 'friendRemove', 'invite', 'stat', 'adminReset', 'history', 'game', ...DM_MSGS]);
+const ACCOUNT_MSGS = new Set(['register', 'login', 'logout', 'account', 'password', 'friendAdd', 'friendAccept', 'friendRemove', 'invite', 'stat', 'adminReset', 'history', 'game', 'shopBuy', 'shopEquip', ...DM_MSGS]);
 
 wss.on('connection', (ws, req) => {
   let token = null;

@@ -2,12 +2,15 @@
  * Zapisi u pohrani (store.js):
  *   user:<id>   { id, uname, name, pass, av, img, stats, friends: { <id>: 'ok'|'out'|'in' }, created, seen,
  *                 chips, refills, chipsLast: { d, t, refill } }   (žetoni za poker; chips nema dok se prvi put ne igra)
+ *                 duk, dukLast: { n, why, t }, dukDay: { d, bots, daily }, inv: [id predmeta], eq: { fr, bd, ti, tb, kb }
+ *                 (dukati i trgovina, vidi public/shop.js; duk nema dok se prvi put ne zatraži)
  *   sess:<hash> { uid, t }   (hash = sha256 tokena; sam token zna samo preglednik)
  *   dm:<a>:<b>  { seq, m: [{ id, f, t, at }], r: { <uid>: id zadnje pročitane } }   (a < b; direktne poruke među prijateljima)
  *   lobby       { seq, m: [{ id, f, t, at, code? }] }   (grupni chat za sve, zadnjih LOBBY_KEEP poruka)
  */
 'use strict';
 const crypto = require('crypto');
+const Shop = require('../public/shop.js');
 
 const UNAME_RE = /^[\p{L}\p{N}_.-]{3,20}$/u;
 const HIST_MAX = 20;
@@ -21,6 +24,8 @@ const MAX_GAME_MS = 3 * 3600e3; // jedna partija se broji najviše 3 sata (npr. 
 const STAT_KEYS = ['briskula', 'briskula_meno', 'treseta', 'treseta_meno', 'poker', 'turnir', 'covjece', 'kviz'];
 const statKey = (kind, low) => kind === 'poker' || kind === 'turnir' || kind === 'covjece' || kind === 'kviz' ? kind : (kind === 'treseta' ? 'treseta' : 'briskula') + (low ? '_meno' : '');
 
+// datum po hrvatskom vremenu (dnevni bonus i granica za botove kreću u ponoć)
+const today = () => { try { return new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Zagreb' }); } catch { return new Date().toISOString().slice(0, 10); } };
 const sha = s => crypto.createHash('sha256').update(s).digest('hex');
 function hashPass(pass) {
   const salt = crypto.randomBytes(16).toString('hex');
@@ -204,6 +209,73 @@ function create(store) {
       return chips;
     },
 
+    // ---------- dukati i trgovina ----------
+    /** stanje dukata; stari računi dobiju početnih 100 + 5 za svaku dosadašnju pobjedu (jednom) */
+    dukOf(u) {
+      if (!u) return 0;
+      if (!Number.isFinite(u.duk)) {
+        let wins = 0;
+        for (const sec of Object.values(u.stats || {})) for (const x of Object.values(sec || {})) wins += (x && x.w) || 0;
+        u.duk = Shop.EARN.start + Math.min(Shop.EARN.oldMax, wins * Shop.EARN.perOldWin);
+        save(u);
+      }
+      return u.duk;
+    },
+    /** dodaj dukate (why = kratko objašnjenje za obavijest); vraća koliko je stvarno dodano */
+    addDuk(u, n, why, bots) {
+      n = Math.max(0, Math.round(+n || 0));
+      api.dukOf(u);
+      const day = today();
+      if (!u.dukDay || u.dukDay.d !== day) u.dukDay = { d: day, bots: 0 };
+      // protiv botova (partije prijavljuje preglednik) ima dnevna granica
+      if (bots) { n = Math.min(n, Math.max(0, Shop.EARN.botDay - u.dukDay.bots)); u.dukDay.bots += n; }
+      if (!n) return 0;
+      u.duk += n;
+      u.dukLast = { n, why: String(why || ''), t: Date.now() };
+      save(u);
+      return n;
+    },
+    /** dnevni bonus kod prve prijave u danu */
+    daily(u) {
+      api.dukOf(u);
+      const day = today();
+      if (!u.dukDay || u.dukDay.d !== day) u.dukDay = { d: day, bots: 0 };
+      if (u.dukDay.daily) return 0;
+      u.dukDay.daily = true;
+      return api.addDuk(u, Shop.EARN.daily, 'dnevni bonus');
+    },
+    invOf: u => (u && u.inv) || [],
+    eqOf: u => (u && u.eq) || {},
+    /** kupnja predmeta iz trgovine; kupljeni predmet se odmah i opremi */
+    buy(u, id) {
+      const it = Shop.BY_ID[id];
+      if (!it) return { error: 'Taj predmet ne postoji.' };
+      const inv = u.inv || (u.inv = []);
+      if (inv.includes(id)) return { error: 'To već imaš.' };
+      if (api.dukOf(u) < it.price) return { error: 'Nemaš dovoljno dukata.' };
+      u.duk -= it.price;
+      inv.push(id);
+      (u.eq || (u.eq = {}))[it.slot] = id;
+      save(u);
+      return { item: it };
+    },
+    /** opremi kupljeni predmet ili skini (id = null) ono što je u tom mjestu */
+    equip(u, slot, id) {
+      if (!Shop.SLOTS.some(s => s.id === slot)) return { error: 'Neispravno mjesto.' };
+      const eq = u.eq || (u.eq = {});
+      if (id == null) { delete eq[slot]; save(u); return {}; }
+      const it = Shop.BY_ID[id];
+      if (!it || it.slot !== slot || !(u.inv || []).includes(id)) return { error: 'Taj predmet nemaš.' };
+      eq[slot] = id; save(u);
+      return {};
+    },
+    /** ukrasi koje vide drugi igrači (okvir, značka, titula) */
+    cosOf(u) {
+      const eq = (u && u.eq) || {}, o = {};
+      for (const k of ['fr', 'bd', 'ti']) if (eq[k] && Shop.BY_ID[eq[k]]) o[k] = eq[k];
+      return Object.keys(o).length ? o : null;
+    },
+
     // ---------- prijatelji ----------
     /** zahtjev za prijateljstvo; ako je drugi već poslao zahtjev, odmah ste prijatelji */
     befriend(u, uname) {
@@ -294,4 +366,4 @@ function create(store) {
   return api;
 }
 
-module.exports = { create, STAT_KEYS, statKey, WALLET_START, WALLET_MIN };
+module.exports = { create, STAT_KEYS, statKey, WALLET_START, WALLET_MIN, Shop };

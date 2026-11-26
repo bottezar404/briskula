@@ -13,18 +13,24 @@ const AV = require('../public/avatars.js');
 const P = require('../public/poker.js');
 const PB = require('../public/poker-bot.js');
 const TR = require('../public/turnir.js');
+const CJ = require('../public/covjece.js');
+const CB = require('../public/covjece-bot.js');
 const Store = require('./store.js');
 const Accounts = require('./accounts.js');
 const ACC = Accounts.create(Store.open());
 // igra: briškula ili trešeta; low = "Chi fa meno" (na manje) za obje
 // (stari klijenti šalju kind 'meno' = briškula na manje)
-const kindOf = m => m.kind === 'treseta' || m.kind === 'poker' || m.kind === 'turnir' ? m.kind : 'briskula';
-const lowOf = m => m.kind !== 'poker' && m.kind !== 'turnir' && (!!m.low || m.kind === 'meno');
-const engOf = r => r.kind === 'treseta' ? T : r.kind === 'poker' ? P : E;
-const botOf = r => r.kind === 'treseta' ? TB : r.kind === 'poker' ? PB : B;
-// strana (za brojanje pobjeda): u pokeru svatko igra za sebe, i u četvero
-const sideOf = (r, p) => r.kind === 'poker' ? p : E.teamOf(r.mode, p);
-const sideCount = r => r.mode === 4 && r.kind !== 'poker' ? 2 : r.mode;
+// 'covjece' = Čovječe ne ljuti se (društvena igra s kockom, ne karte)
+const KINDS = ['treseta', 'poker', 'turnir', 'covjece'];
+const kindOf = m => KINDS.includes(m.kind) ? m.kind : 'briskula';
+const lowOf = m => ['briskula', 'treseta'].includes(kindOf(m)) && (!!m.low || m.kind === 'meno');
+const engOf = r => r.kind === 'treseta' ? T : r.kind === 'poker' ? P : r.kind === 'covjece' ? CJ : E;
+const botOf = r => r.kind === 'treseta' ? TB : r.kind === 'poker' ? PB : r.kind === 'covjece' ? CB : B;
+// u pokeru i Čovječe svatko igra za sebe, i u četvero
+const solo = r => r.kind === 'poker' || r.kind === 'covjece';
+// strana (za brojanje pobjeda)
+const sideOf = (r, p) => solo(r) ? p : E.teamOf(r.mode, p);
+const sideCount = r => r.mode === 4 && !solo(r) ? 2 : r.mode;
 
 const PORT = process.env.PORT || 3000;
 const PUB = path.join(__dirname, '..', 'public');
@@ -90,6 +96,7 @@ const PACE = {
   briskula: { trick: 1400, bot: 750, botRnd: 400 },
   treseta: { trick: 1050, bot: 450, botRnd: 300 },
   poker: { trick: 1100, bot: 800, botRnd: 700 }, // trick = pauza prije sljedeće karte na stolu
+  covjece: { trick: 900, bot: 550, botRnd: 300 }, // trick = pauza kad bacanje nema poteza (da se vidi kocka)
 };
 const PACE_SCALE = +process.env.BRK_PACE_SCALE || 1; // samo za testove
 for (const k in PACE) for (const f in PACE[k]) PACE[k][f] *= PACE_SCALE;
@@ -295,6 +302,7 @@ function startGame(r) {
   const prevDealer = r.game && r.game.kind === r.kind ? r.game.dealer : -1;
   const o = { names: r.seats.map(s => s.name), bots: r.seats.map(s => !!s.bot), dealer: prevDealer + 1, blindEvery: r.tour ? TOUR_BLINDS : undefined };
   if (r.kind === 'poker') r.game = P.newGame(r.mode, o);
+  else if (r.kind === 'covjece') r.game = CJ.newGame(r.mode, o);
   else r.game = r.kind === 'treseta' ? T.newGame(r.mode, Object.assign(o, { target: r.target, low: r.low })) : E.newGame(r.mode, Object.assign(o, { low: r.low }));
   r.signals = []; r.ready = new Set();
   // tko je za stolom s računom (za statistiku; tko izađe usred partije, upiše mu se poraz)
@@ -369,7 +377,9 @@ function turnTimer(r) {
   r.turnTimer = setTimeout(() => {
     r.turnTimer = null;
     if (r.turnKey !== key || !timedTurn(r)) return;
-    if (r.kind === 'poker') pokerTimeout(r, g.turn); else forfeit(r, g.turn);
+    if (r.kind === 'poker') pokerTimeout(r, g.turn);
+    else if (r.kind === 'covjece') covjeceTimeout(r, g.turn);
+    else forfeit(r, g.turn);
   }, ms + TURN_GRACE * TURN_SCALE);
 }
 
@@ -380,6 +390,17 @@ function pokerTimeout(r, p) {
   if (!L) return;
   P.play(g, p, L.check ? 'check' : 'fold');
   pushSignal(r, -1, g.players[p].name + ' nije odigrao/la na vrijeme' + (L.check ? ' (provjera).' : ' i odustaje od ruke.'));
+  broadcast(r); schedule(r);
+}
+
+// Čovječe: tko ne odigra na vrijeme, potez (bacanje i pomak) odigra se umjesto njega; igra ide dalje
+function covjeceTimeout(r, p) {
+  const g = r.game;
+  for (let k = 0; k < 2 && g.phase === 'play' && g.turn === p; k++) {
+    const mv = CB.choose(CJ.viewFor(g, p), 'normal');
+    if (!CJ.play(g, p, mv) || mv !== 'roll') break; // nakon pomaka figure stani (šestica: igrač opet baca sam)
+  }
+  pushSignal(r, -1, g.players[p].name + ' nije odigrao/la na vrijeme, potez je odigran automatski.');
   broadcast(r); schedule(r);
 }
 

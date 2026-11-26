@@ -89,7 +89,10 @@
     if (m.storage) acc.storage = m.storage;
     const was = acc.user;
     acc.user = m.user; acc.friends = m.friends || [];
+    if (dm.with && !acc.friends.some(f => f.id === dm.with && f.status === 'ok')) dm.with = null;
+    else if (dm.with && m.user && 'img' in m.user) net.send({ type: 'dmOpen', id: dm.with }); // nova veza: dohvati propušteno
     if (!m.user) {
+      dm.conv = {};
       if (m.expired || was) store.set('auth', null);
       if (m.expired) toast('Prijava je istekla, prijavi se ponovno.');
     } else if ('img' in m.user) {
@@ -108,7 +111,7 @@
   }
   function friendCounts() {
     const ok = acc.friends.filter(f => f.status === 'ok');
-    return { on: ok.filter(f => f.at).length, req: acc.friends.filter(f => f.status === 'in').length };
+    return { on: ok.filter(f => f.at).length, req: acc.friends.filter(f => f.status === 'in').length, msg: ok.reduce((a, f) => a + (f.unread || 0), 0) };
   }
   // poziv u sobu od prijatelja
   function showInvite(m) {
@@ -289,6 +292,7 @@
         else if (m.type === 'account') onAccount(m);
         else if (m.type === 'authError') { acc.err = m.msg; acc.busy = false; if (modal === 'account') render(); else toast(m.msg); }
         else if (m.type === 'invite') showInvite(m);
+        else if (m.type === 'dm' || m.type === 'dmMsg' || m.type === 'dmSeen' || m.type === 'dmRead') onDm(m);
       };
       ws.onclose = () => { this.ok = false; if (ctrl === this && room) render(); this.later(); };
     }
@@ -358,6 +362,7 @@
   }
   function setChat(open) {
     chat.open = open;
+    if (open) dm.with = null;
     if (open && room) chat.read[room.code] = (room.chat || []).reduce((a, m) => Math.max(a, m.id), 0);
     render();
     if (open && chat.el && window.matchMedia('(min-width: 900px)').matches) chat.el.querySelector('input').focus();
@@ -405,6 +410,119 @@
     if (atBottom || msgs.length && msgs[msgs.length - 1].from === room.you) list.scrollTop = list.scrollHeight;
   }
 
+  // ---------- direktne poruke među prijateljima ----------
+  const DM_MAX = 500;
+  const dm = { with: null, conv: {}, el: null, key: '' }; // conv[id] = { msgs, seen }
+  const friendById = id => acc.friends.find(f => f.id === id);
+  const dmVisible = () => !!dm.with && loggedIn() && document.visibilityState === 'visible';
+  function openDm(id) {
+    const f = friendById(id);
+    if (!f || f.status !== 'ok' || !net) return;
+    dm.with = id; chat.open = false; modal = null; f.unread = 0;
+    net.send({ type: 'dmOpen', id });
+    hideDmNote();
+    render();
+    if (dm.el && window.matchMedia('(min-width: 900px)').matches) dm.el.querySelector('input').focus();
+  }
+  function closeDm() { dm.with = null; render(); }
+  function onDm(m) {
+    const id = m.with;
+    const cv = dm.conv[id] || (dm.conv[id] = { msgs: [], seen: 0 });
+    const f = friendById(id);
+    if (m.type === 'dm') { cv.msgs = m.msgs || []; cv.seen = m.seen || 0; cv.loaded = true; }
+    else if (m.type === 'dmSeen') cv.seen = Math.max(cv.seen, m.seen || 0);
+    else if (m.type === 'dmRead') { if (f) f.unread = 0; }
+    else if (m.type === 'dmMsg') {
+      const x = m.msg;
+      if (!cv.msgs.some(y => y.id === x.id)) cv.msgs.push(x);
+      if (cv.msgs.length > 200) cv.msgs.shift();
+      const mine = acc.user && x.f === acc.user.id;
+      if (!mine) {
+        if (dm.with === id && dmVisible()) net.send({ type: 'dmRead', id });
+        else {
+          if (f) f.unread = (f.unread || 0) + 1;
+          if (f) f.last = x.at;
+          sfx.chat();
+          if (dm.with !== id) showDmNote(f || { id, name: m.from || m.uname }, x.t);
+        }
+      }
+    }
+    if (m.type === 'dm' || m.type === 'dmSeen') return renderDm();
+    if (!room || !room.game || modal === 'friends') render(); else renderDm();
+  }
+  // obavijest o novoj poruci (kad razgovor nije otvoren)
+  function showDmNote(f, text) {
+    let el = document.getElementById('dmNote');
+    if (!el) { el = document.createElement('div'); el.id = 'dmNote'; el.className = 'invite dm-note'; document.body.appendChild(el); }
+    el.innerHTML = `<div>💬 <b>${esc(f.name)}</b><br><span class="muted">${esc(text.length > 80 ? text.slice(0, 80) + '…' : text)}</span></div>
+      <button class="small" id="dmGo">Odgovori</button><button class="ghost small" id="dmX" aria-label="Zatvori">✕</button>`;
+    el.hidden = false;
+    clearTimeout(showDmNote.t); showDmNote.t = setTimeout(hideDmNote, 9000);
+    el.querySelector('#dmX').onclick = hideDmNote;
+    el.querySelector('#dmGo').onclick = () => openDm(f.id);
+  }
+  function hideDmNote() { const el = document.getElementById('dmNote'); if (el) el.hidden = true; }
+  function dmTime(t) {
+    const d = new Date(t), now = new Date();
+    const hm = d.toLocaleTimeString('hr-HR', { hour: '2-digit', minute: '2-digit' });
+    if (d.toDateString() === now.toDateString()) return hm;
+    const y = new Date(now); y.setDate(now.getDate() - 1);
+    if (d.toDateString() === y.toDateString()) return 'jučer ' + hm;
+    return d.getDate() + '.' + (d.getMonth() + 1) + '. ' + hm;
+  }
+  function renderDm() {
+    const f = dm.with && loggedIn() && friendById(dm.with);
+    const show = !!(f && f.status === 'ok');
+    if (show) document.body.classList.add('chat-open');
+    else if (!(chat.open && room && !room.local && room.code)) document.body.classList.remove('chat-open');
+    if (!show) { if (dm.el) dm.el.hidden = true; return; }
+    if (!dm.el) {
+      const el = dm.el = document.createElement('div');
+      el.id = 'dm'; el.className = 'chat dm';
+      el.innerHTML = `<div class="chat-head"><span id="dmAv"></span><span class="dm-who"><b id="dmName"></b><span class="muted" id="dmSub"></span></span><button class="ghost small" id="dmBack" aria-label="Prijatelji">👥</button><button class="ghost small" id="dmClose" aria-label="Zatvori">✕</button></div>
+        <div class="chat-list" id="dmList"></div>
+        <form class="chat-form" id="dmForm" autocomplete="off">
+          <input id="dmIn" maxlength="${DM_MAX}" placeholder="Poruka…" enterkeyhint="send">
+          <button type="submit">Pošalji</button>
+        </form>`;
+      document.body.appendChild(el);
+      el.querySelector('#dmClose').onclick = closeDm;
+      el.querySelector('#dmBack').onclick = () => { dm.with = null; modal = 'friends'; render(); };
+      el.querySelector('#dmForm').onsubmit = e => {
+        e.preventDefault();
+        const inp = el.querySelector('#dmIn');
+        const t = inp.value.replace(/\s+/g, ' ').trim().slice(0, DM_MAX);
+        if (!t || !dm.with || !net) return;
+        net.send({ type: 'dmSend', id: dm.with, text: t }); inp.value = '';
+      };
+      dm.key = '';
+    }
+    dm.el.hidden = false;
+    const cv = dm.conv[f.id] || { msgs: [], seen: 0 };
+    const head = f.id + ':' + f.name + ':' + f.av + ':' + friendWhere(f);
+    if (dm.head !== head) {
+      dm.head = head;
+      dm.el.querySelector('#dmAv').innerHTML = avatar({ av: f.av, name: f.name, cm: 0 }, '', `<span class="pres ${f.at ? 'on' : ''}"></span>`);
+      dm.el.querySelector('#dmName').textContent = f.name;
+      dm.el.querySelector('#dmSub').textContent = friendWhere(f);
+    }
+    const me = acc.user.id;
+    const lastMine = cv.msgs.filter(x => x.f === me).pop();
+    const seenId = lastMine && cv.seen >= lastMine.id ? lastMine.id : 0;
+    const key = f.id + ':' + cv.msgs.map(x => x.id).join(',') + ':' + seenId + ':' + !!cv.loaded;
+    if (key === dm.key) return;
+    const switched = !dm.key.startsWith(f.id + ':');
+    dm.key = key;
+    const list = dm.el.querySelector('#dmList');
+    const atBottom = switched || list.scrollHeight - list.scrollTop - list.clientHeight < 40;
+    list.innerHTML = cv.msgs.length ? cv.msgs.map(x => {
+      const mine = x.f === me;
+      return `<div class="msg ${mine ? 'mine' : ''}"><div class="who">${mine ? 'Ti' : esc(f.name)} <span class="t">${dmTime(x.at)}</span></div><div class="txt">${esc(x.t)}</div>${x.id === seenId ? '<div class="seen">Viđeno ✓</div>' : ''}</div>`;
+    }).join('') : `<p class="muted chat-empty">${cv.loaded ? 'Još nema poruka. Napiši nešto ' + esc(f.name) + '!' : 'Učitavanje…'}</p>`;
+    if (atBottom || (cv.msgs.length && cv.msgs[cv.msgs.length - 1].f === me)) list.scrollTop = list.scrollHeight;
+  }
+  document.addEventListener('visibilitychange', () => { if (dmVisible() && net) { const f = friendById(dm.with); if (f && f.unread) { f.unread = 0; render(); } net.send({ type: 'dmRead', id: dm.with }); } });
+
   // ---------- prikaz ----------
   function render() {
     if (!room) renderMenu();
@@ -412,6 +530,7 @@
     else renderGame();
     renderModal();
     renderChat();
+    renderDm();
   }
 
   function seg(name, opts, val) {
@@ -529,7 +648,7 @@
       <div class="panel" style="text-align:center">
         <div class="muted">Kod sobe</div>
         <div class="code">${esc(r.code)}</div>
-        <div class="row center-row">${r.isPublic ? '' : '<button id="share" class="ghost small">Pošalji poziv</button>'}${loggedIn() ? `<button id="inviteF" class="ghost small">👥 Pozovi prijatelje${friendCounts().on ? ` <span class="on-n">${friendCounts().on}</span>` : ''}</button>` : ''}</div>
+        <div class="row center-row">${r.isPublic ? '' : '<button id="share" class="ghost small">Pošalji poziv</button>'}${loggedIn() ? `<button id="inviteF" class="ghost small">👥 Prijatelji${friendCounts().on ? ` <span class="on-n">${friendCounts().on}</span>` : ''}${friendCounts().msg ? `<span class="badge">${friendCounts().msg}</span>` : ''}</button>` : ''}</div>
         ${conn ? '' : '<p class="muted">Spajanje na server…</p>'}
       </div>
       <div class="panel">
@@ -1098,7 +1217,7 @@
     return `<div class="acc-row">
       <button class="ghost small" id="accBtn" title="Račun">👤 ${esc(acc.user.uname)}</button>
       <button class="ghost small" id="statsBtn">📊 Statistika</button>
-      <button class="ghost small" id="friendsBtn">👥 Prijatelji${fc.on ? ` <span class="on-n">${fc.on}</span>` : ''}${fc.req ? `<span class="badge">${fc.req}</span>` : ''}</button>
+      <button class="ghost small" id="friendsBtn">👥 Prijatelji${fc.on ? ` <span class="on-n">${fc.on}</span>` : ''}${fc.req + fc.msg ? `<span class="badge">${fc.req + fc.msg > 9 ? '9+' : fc.req + fc.msg}</span>` : ''}</button>
     </div>`;
   }
   function bindAccountRow() {
@@ -1173,15 +1292,18 @@
         if (here) sub = 'U tvojoj sobi';
         else if (inRoom && f.at) btns += `<button class="small" data-finv="${f.id}">Pozovi</button>`;
         else if (f.at && f.at.open && f.at.code) btns += `<button class="small" data-fjoin="${esc(f.at.code)}">Pridruži se</button>`;
+        btns = `<button class="ghost small msg-btn${f.unread ? ' new' : ''}" data-fmsg="${f.id}" aria-label="Poruke">💬${f.unread ? `<span class="badge">${f.unread > 9 ? '9+' : f.unread}</span>` : ''}</button>` + btns;
+        if (f.unread) sub = f.unread === 1 ? 'Nova poruka' : f.unread + (f.unread < 5 ? ' nove poruke' : ' novih poruka');
         btns += `<button class="ghost small" data-frem="${f.id}" data-fname="${esc(f.name)}" aria-label="Ukloni">✕</button>`;
       }
-      return `<li class="${f.at ? 'online' : ''}">${avatar({ av: f.av, name: f.name, cm: 0 }, 'md', f.status === 'ok' ? `<span class="pres ${f.at ? 'on' : ''}"></span>` : '')}
+      return `<li class="${f.at ? 'online' : ''}${f.unread ? ' unread' : ''}">${avatar({ av: f.av, name: f.name, cm: 0 }, 'md', f.status === 'ok' ? `<span class="pres ${f.at ? 'on' : ''}"></span>` : '')}
         <span class="n"><b>${esc(f.name)}</b> <span class="muted">${esc(f.uname)}</span><span class="sub">${esc(sub)}</span></span>${btns}</li>`;
     };
     return `<h2>Prijatelji</h2>
       <form id="fAdd" class="row" autocomplete="off"><input id="fName" maxlength="20" placeholder="Korisničko ime prijatelja" autocapitalize="off" spellcheck="false"><button type="submit" style="flex:0 0 auto">Dodaj</button></form>
       <p class="muted" style="margin:6px 0 10px">Tvoje korisničko ime je <b>${esc(acc.user.uname)}</b>, pošalji ga prijateljima.</p>
       ${list.length ? `<ul class="seats friends">${list.map(item).join('')}</ul>` : '<p class="muted" style="text-align:center">Još nemaš prijatelja na popisu.</p>'}
+      ${list.some(f => f.status === 'ok') ? '<p class="muted">💬 šalje poruku prijatelju, i kad nije online (vidjet će je kad uđe).</p>' : ''}
       ${inRoom ? '<p class="muted">Prijatelji koji su online dobit će poziv u tvoju sobu.</p>' : ''}
       <button id="close" style="width:100%">Zatvori</button>`;
   }
@@ -1206,7 +1328,7 @@
       };
     }
     const lo = el.querySelector('#logout');
-    if (lo) lo.onclick = () => { net && net.send({ type: 'logout' }); store.set('auth', null); acc.user = null; acc.friends = []; modal = null; render(); toast('Odjavljen/a si.'); };
+    if (lo) lo.onclick = () => { net && net.send({ type: 'logout' }); store.set('auth', null); acc.user = null; acc.friends = []; dm.with = null; dm.conv = {}; modal = null; render(); toast('Odjavljen/a si.'); };
     const pw = el.querySelector('#pwForm');
     if (pw) pw.onsubmit = e => { e.preventDefault(); acc.err = ''; net.send({ type: 'password', old: el.querySelector('#pwOld').value, pass: el.querySelector('#pwNew').value }); pw.reset(); };
     const ta = el.querySelector('#toAcc'); if (ta) ta.onclick = () => { modal = 'account'; render(); };
@@ -1219,6 +1341,7 @@
     });
     el.querySelectorAll('[data-finv]').forEach(b => b.onclick = () => net.send({ type: 'invite', id: +b.dataset.finv }));
     el.querySelectorAll('[data-fjoin]').forEach(b => b.onclick = () => joinRoomCode(b.dataset.fjoin));
+    el.querySelectorAll('[data-fmsg]').forEach(b => b.onclick = () => openDm(+b.dataset.fmsg));
   }
 
   function renderModal() {

@@ -15,19 +15,22 @@ const PB = require('../public/poker-bot.js');
 const TR = require('../public/turnir.js');
 const CJ = require('../public/covjece.js');
 const CB = require('../public/covjece-bot.js');
+const KV = require('../public/kviz.js');
+const KB = require('../public/kviz-bot.js');
 const Store = require('./store.js');
 const Accounts = require('./accounts.js');
 const ACC = Accounts.create(Store.open());
 // igra: briškula ili trešeta; low = "Chi fa meno" (na manje) za obje
 // (stari klijenti šalju kind 'meno' = briškula na manje)
 // 'covjece' = Čovječe ne ljuti se (društvena igra s kockom, ne karte)
-const KINDS = ['treseta', 'poker', 'turnir', 'covjece'];
+// 'kviz' = kviz Znalac (svi odgovaraju u isto vrijeme, nema reda poteza)
+const KINDS = ['treseta', 'poker', 'turnir', 'covjece', 'kviz'];
 const kindOf = m => KINDS.includes(m.kind) ? m.kind : 'briskula';
 const lowOf = m => ['briskula', 'treseta'].includes(kindOf(m)) && (!!m.low || m.kind === 'meno');
-const engOf = r => r.kind === 'treseta' ? T : r.kind === 'poker' ? P : r.kind === 'covjece' ? CJ : E;
-const botOf = r => r.kind === 'treseta' ? TB : r.kind === 'poker' ? PB : r.kind === 'covjece' ? CB : B;
-// u pokeru i Čovječe svatko igra za sebe, i u četvero
-const solo = r => r.kind === 'poker' || r.kind === 'covjece';
+const engOf = r => r.kind === 'treseta' ? T : r.kind === 'poker' ? P : r.kind === 'covjece' ? CJ : r.kind === 'kviz' ? KV : E;
+const botOf = r => r.kind === 'treseta' ? TB : r.kind === 'poker' ? PB : r.kind === 'covjece' ? CB : r.kind === 'kviz' ? KB : B;
+// u pokeru, Čovječe i kvizu svatko igra za sebe, i u četvero
+const solo = r => r.kind === 'poker' || r.kind === 'covjece' || r.kind === 'kviz';
 // strana (za brojanje pobjeda)
 const sideOf = (r, p) => solo(r) ? p : E.teamOf(r.mode, p);
 const sideCount = r => r.mode === 4 && !solo(r) ? 2 : r.mode;
@@ -97,6 +100,7 @@ const PACE = {
   treseta: { trick: 1050, bot: 450, botRnd: 300 },
   poker: { trick: 1100, bot: 800, botRnd: 700 }, // trick = pauza prije sljedeće karte na stolu
   covjece: { trick: 900, bot: 550, botRnd: 300 }, // trick = pauza kad bacanje nema poteza (da se vidi kocka)
+  kviz: { trick: 1, bot: 1, botRnd: 0 }, // kviz: pauze i vrijeme za pitanje su u kviz.js (množe se s PACE_SCALE)
 };
 const PACE_SCALE = +process.env.BRK_PACE_SCALE || 1; // samo za testove
 for (const k in PACE) for (const f in PACE[k]) PACE[k][f] *= PACE_SCALE;
@@ -169,6 +173,7 @@ function createRoom(mode, host, opts) {
     level: ['easy', 'normal', 'hard'].includes(opts.level) ? opts.level : 'normal',
     isPublic: !!opts.isPublic, kind: opts.kind || 'briskula', low: !!opts.low, tour: null, target: T.TARGETS.includes(+opts.target) ? +opts.target : 41, signals: [], chat: [], chatSeq: 0, wins: null, touched: Date.now(), awayTimer: null,
     turnTime: turnTimeOf(opts.turnTime), turnTimer: null, turnKey: null, turnEnds: 0,
+    kvUsed: [], kvBots: [], kvQ: -1, // kviz: nedavna pitanja u sobi (da se ne ponavljaju), timeri botova
   };
   setKind(r, r.kind, r.low);
   rooms.set(r.code, r);
@@ -231,7 +236,7 @@ function leaveCurrent(token) {
     const h = r.seats.find(s => s && !s.bot);
     r.host = h ? h.token : null;
   }
-  if (!r.seats.some(s => s && !s.bot)) { clearTimeout(r.timer); stopTurnTimer(r); rooms.delete(r.code); return; }
+  if (!r.seats.some(s => s && !s.bot)) { clearTimeout(r.timer); stopTurnTimer(r); kvStop(r); rooms.delete(r.code); return; }
   broadcast(r);
 }
 
@@ -303,6 +308,11 @@ function startGame(r) {
   const o = { names: r.seats.map(s => s.name), bots: r.seats.map(s => !!s.bot), dealer: prevDealer + 1, blindEvery: r.tour ? TOUR_BLINDS : undefined };
   if (r.kind === 'poker') r.game = P.newGame(r.mode, o);
   else if (r.kind === 'covjece') r.game = CJ.newGame(r.mode, o);
+  else if (r.kind === 'kviz') {
+    r.game = KV.newGame(r.mode, Object.assign(o, { exclude: r.kvUsed, qTime: KV.QTIME * PACE_SCALE }));
+    r.kvUsed = r.kvUsed.concat(r.game.qs.map(q => q.id)).slice(-150);
+    kvStop(r);
+  }
   else r.game = r.kind === 'treseta' ? T.newGame(r.mode, Object.assign(o, { target: r.target, low: r.low })) : E.newGame(r.mode, Object.assign(o, { low: r.low }));
   r.signals = []; r.ready = new Set();
   // tko je za stolom s računom (za statistiku; tko izađe usred partije, upiše mu se poraz)
@@ -359,7 +369,7 @@ function chipsLeave(r, i) {
 // timer za potez vrijedi samo kad su za stolom barem dva čovjeka
 function timedTurn(r) {
   const g = r.game;
-  if (!g || g.phase !== 'play' || !r.turnTime) return false;
+  if (!g || g.phase !== 'play' || !r.turnTime || g.kind === 'kviz') return false;
   const s = r.seats[g.turn];
   return !!s && !s.bot && r.seats.filter(x => x && !x.bot).length >= 2;
 }
@@ -429,6 +439,7 @@ function schedule(r) {
   const g = r.game;
   turnTimer(r);
   if (!g) return;
+  if (g.kind === 'kviz') return kvSchedule(r);
   if (g.phase === 'collect') {
     r.timer = setTimeout(() => {
       engOf(r).collect(g);
@@ -445,6 +456,35 @@ function schedule(r) {
     // odspojeni igrač: ako nema timera za potez, bot nakon nekog vremena igra umjesto njega
     else if ((!c || !c.ws) && !r.turnTimer) r.awayTimer = setTimeout(() => botMove(r), AWAY_AUTOPLAY);
   }
+}
+
+// ---------- kviz: svi odgovaraju istodobno ----------
+function kvStop(r) { for (const t of r.kvBots || []) clearTimeout(t); r.kvBots = []; r.kvQ = -1; }
+function kvSchedule(r) {
+  const g = r.game;
+  if (g.phase === 'collect') {
+    kvStop(r);
+    // rok pauze se pamti, da je npr. ponovno spajanje igrača ne produlji
+    const key = g.qi + ':' + g.stage;
+    if (!r.kvDue || r.kvDue.g !== g || r.kvDue.key !== key) r.kvDue = { g, key, at: Date.now() + g.wait * PACE_SCALE };
+    r.timer = setTimeout(() => { if (r.game !== g) return; KV.collect(g); broadcast(r); schedule(r); }, Math.max(0, r.kvDue.at - Date.now()));
+  } else if (g.phase === 'play') {
+    // kraj vremena za pitanje (uz malo tolerancije za kašnjenje mreže)
+    r.timer = setTimeout(() => { if (r.game !== g) return; if (KV.timeUp(g)) { broadcast(r); schedule(r); } }, Math.max(0, g.qEnd - Date.now()) + KV.GRACE * PACE_SCALE);
+    // botovi odgovaraju svaki u svoje vrijeme (jednom po pitanju)
+    if (r.kvQ !== g.qi) {
+      kvStop(r); r.kvQ = g.qi;
+      g.players.forEach((pl, p) => {
+        const s = r.seats[p];
+        if (!s || !s.bot || pl.ans) return;
+        const pick = KB.plan(g, p, s.name.endsWith(' (bot)') ? 'normal' : r.level);
+        r.kvBots.push(setTimeout(() => {
+          if (r.game !== g || g.phase !== 'play' || r.kvQ !== g.qi) return;
+          if (KV.play(g, p, pick.move)) { broadcast(r); schedule(r); }
+        }, Math.min(pick.delay, g.qTime - 50)));
+      });
+    }
+  } else kvStop(r);
 }
 
 // poker: ljudi koji su još u igri (nisu ispali)
@@ -905,7 +945,7 @@ wss.on('connection', (ws, req) => {
 // čišćenje starih soba
 setInterval(() => {
   const now = Date.now();
-  for (const [k, r] of rooms) if (now - r.touched > ROOM_TTL) { clearTimeout(r.timer); stopTurnTimer(r); rooms.delete(k); }
+  for (const [k, r] of rooms) if (now - r.touched > ROOM_TTL) { clearTimeout(r.timer); stopTurnTimer(r); kvStop(r); rooms.delete(k); }
   for (const [k, c] of clients) if (!c.ws && !c.room) { detach(k, c); clients.delete(k); }
 }, 60000).unref();
 

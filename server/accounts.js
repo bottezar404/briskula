@@ -16,8 +16,8 @@ const DM_KEEP = 200, LOBBY_KEEP = 100;
 // a nakon partije se na račun vraća ono s čim je igrač završio. Tko padne ispod WALLET_MIN, dobije dopunu do WALLET_MIN.
 const WALLET_START = 5000, WALLET_MIN = 1000; // koliko zadnjih poruka po razgovoru se čuva
 // vrste igara u statistici
-const STAT_KEYS = ['briskula', 'briskula_meno', 'treseta', 'treseta_meno', 'poker', 'turnir', 'covjece'];
-const statKey = (kind, low) => kind === 'poker' || kind === 'turnir' || kind === 'covjece' ? kind : (kind === 'treseta' ? 'treseta' : 'briskula') + (low ? '_meno' : '');
+const STAT_KEYS = ['briskula', 'briskula_meno', 'treseta', 'treseta_meno', 'poker', 'turnir', 'covjece', 'kviz'];
+const statKey = (kind, low) => kind === 'poker' || kind === 'turnir' || kind === 'covjece' || kind === 'kviz' ? kind : (kind === 'treseta' ? 'treseta' : 'briskula') + (low ? '_meno' : '');
 
 const sha = s => crypto.createHash('sha256').update(s).digest('hex');
 function hashPass(pass) {

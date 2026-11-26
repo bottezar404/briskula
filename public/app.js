@@ -323,6 +323,7 @@
     }
     for (const s of r.signals || []) if (!seenSignals.has(s.id)) seenSignals.set(s.id, Date.now());
     chatUpdate(r, old);
+    if (pendingInv.length && !r.local && r.code && net) { pendingInv.forEach(id => net.send({ type: 'invite', id })); pendingInv = []; }
     render();
   }
 
@@ -531,6 +532,7 @@
     renderModal();
     renderChat();
     renderDm();
+    renderSideF();
   }
 
   function seg(name, opts, val) {
@@ -1276,6 +1278,73 @@
       ${table('bots', 'Protiv botova')}
       <p class="muted">Turnir se broji kao jedna partija (pobjeda = prvo mjesto), a njegove igre se broje i pod briškulom, trešetom i pokerom. Tko napusti online partiju prije kraja, upiše mu se poraz.</p>
       <button id="close" style="width:100%">Zatvori</button>`;
+  }
+
+  // ---------- bočna ploča: online prijatelji na početnom ekranu ----------
+  // PC: stupac s desne strane; mobitel: jezičak uz desni rub koji otvara ladicu
+  let pendingInv = [];            // prijatelji koje treba pozvati čim se napravi soba
+  const side = { el: null, open: false, key: '' };
+  function inviteFromMenu(id) {
+    if (window.BRK_OFFLINE || !loggedIn()) return;
+    const f = friendById(id);
+    if (!f || !f.at) return toast('Prijatelj više nije online.');
+    if (!S.name) { S.name = 'Igrač' + Math.floor(Math.random() * 900 + 100); save(); }
+    pendingInv = [id];
+    side.open = false;
+    ctrl = getNet(); ctrl.send(profileMsg());
+    ctrl.send({ type: 'create', mode: +S.onMode, level: 'normal', kind: S.kind, low: !!S.naManje, target: S.target, turnTime: S.turnTime });
+  }
+  function sideWhat() {
+    const k = S.kind;
+    const what = k === 'turnir' ? 'Turnir' : (KIND_NAMES[k] || 'Briškula') + (S.naManje && k !== 'poker' ? ' · ' + LOW_NAME : '');
+    return what + ' · ' + modeName(k, +S.onMode, true);
+  }
+  function renderSideF() {
+    const show = !room && loggedIn() && !window.BRK_OFFLINE && !modal && !(dm.with && friendById(dm.with));
+    document.body.classList.toggle('side-f', !!show);
+    if (!show) { if (side.el) side.el.hidden = true; return; }
+    if (!side.el) {
+      const el = side.el = document.createElement('aside');
+      el.id = 'sideF'; el.className = 'side-f';
+      document.body.appendChild(el);
+      el.onclick = e => {
+        const b = e.target.closest('button'); if (!b) { if (e.target === el.querySelector('.sf-back')) { side.open = false; renderSideF(); } return; }
+        if (b.id === 'sfTab') { side.open = !side.open; renderSideF(); }
+        else if (b.id === 'sfClose') { side.open = false; renderSideF(); }
+        else if (b.id === 'sfAll') { side.open = false; modal = 'friends'; render(); }
+        else if (b.dataset.sinv) { b.disabled = true; inviteFromMenu(+b.dataset.sinv); }
+        else if (b.dataset.sjoin) { side.open = false; joinRoomCode(b.dataset.sjoin); }
+        else if (b.dataset.smsg) { side.open = false; modal = null; openDm(+b.dataset.smsg); }
+      };
+    }
+    const ok = acc.friends.filter(f => f.status === 'ok');
+    const on = ok.filter(f => f.at).sort((a, b) => (a.at.where === 'game') - (b.at.where === 'game') || a.name.localeCompare(b.name, 'hr'));
+    const req = acc.friends.filter(f => f.status === 'in').length;
+    const unread = ok.reduce((a, f) => a + (f.unread || 0), 0);
+    const key = JSON.stringify([side.open, sideWhat(), req, unread, ok.length, on.map(f => [f.id, f.name, f.av, f.at, f.unread])]);
+    side.el.hidden = false;
+    side.el.classList.toggle('open', side.open);
+    if (key === side.key) return;
+    side.key = key;
+    const item = f => {
+      const busy = f.at.where === 'game';
+      let btn = '';
+      if (f.at.open && f.at.code) btn = `<button class="ghost small" data-sjoin="${esc(f.at.code)}" title="Uđi u njegovu/njezinu sobu">Pridruži se</button>`;
+      if (!busy) btn += `<button class="small" data-sinv="${f.id}">Pozovi</button>`;
+      return `<li class="${busy ? 'busy' : ''}">${avatar({ av: f.av, name: f.name, cm: 0 }, 'md', '<span class="pres on"></span>')}
+        <span class="n"><b>${esc(f.name)}</b><span class="sub">${esc(friendWhere(f))}</span></span>
+        <span class="sf-btns"><button class="ghost small msg-btn" data-smsg="${f.id}" aria-label="Poruka">💬${f.unread ? `<span class="badge">${f.unread > 9 ? '9+' : f.unread}</span>` : ''}</button>${btn}</span></li>`;
+    };
+    const tabBadge = req + unread ? `<span class="badge">${req + unread > 9 ? '9+' : req + unread}</span>` : '';
+    side.el.innerHTML = `<button class="sf-tab" id="sfTab" aria-label="Online prijatelji">👥<span class="on-n">${on.length}</span>${tabBadge}</button>
+      <div class="sf-back"></div>
+      <div class="sf-panel">
+        <div class="sf-head"><b>Online prijatelji</b><span class="on-n">${on.length}</span><button class="ghost small" id="sfClose" aria-label="Zatvori">✕</button></div>
+        ${on.length ? `<ul class="sf-list">${on.map(item).join('')}</ul>`
+          : `<p class="muted sf-empty">${ok.length ? 'Nitko od prijatelja trenutno nije online.' : 'Još nemaš prijatelja. Dodaj ih po korisničkom imenu.'}</p>`}
+        ${on.length ? `<p class="muted sf-note">„Pozovi” napravi sobu (<b>${esc(sideWhat())}</b>) i odmah pošalje poziv.</p>` : ''}
+        <button class="ghost small sf-all" id="sfAll">Svi prijatelji${ok.length - on.length > 0 ? ` (${ok.length - on.length} offline)` : ''}${req ? ` · ${req} ${req === 1 ? 'zahtjev' : 'zahtjeva'}` : ''}</button>
+      </div>`;
   }
   function friendsHtml() {
     if (!loggedIn()) return `<h2>Prijatelji</h2><p>Za prijatelje treba račun.</p><div class="row"><button class="ghost" id="close">Zatvori</button><button id="toAcc">Prijava / registracija</button></div>`;

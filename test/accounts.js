@@ -118,7 +118,12 @@ const uniq = 'u' + Date.now().toString(36).slice(-6);
   assert(full.seats.every(s => s.uname), 'u sobi se vidi korisničko ime');
   a.autoplay = b.autoplay = true;
   b.send({ type: 'start' });
-  await a.until(m => m.type === 'account' && m.friends[0].at && m.friends[0].at.where === 'game', 'u igri');
+  // status "u igri" (partija je ubrzana, pa može završiti prije nego se status pošalje: provjeri na serveru)
+  await Promise.race([
+    a.until(m => m.type === 'account' && m.friends[0].at && m.friends[0].at.where === 'game', 'u igri').then(() => 'game'),
+    a.until(m => m.type === 'room' && m.game && m.game.phase === 'over', 'kraj').then(() => 'over'),
+  ]);
+  a.pos = 0; // kraj partije se čeka ponovno ispod
   const over = await a.until(m => m.type === 'room' && m.game && m.game.phase === 'over', 'kraj partije');
   const res = over.game.result;
   const stA = (await a.until(m => m.type === 'account' && m.user.stats.online.briskula)).user.stats.online.briskula;

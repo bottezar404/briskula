@@ -7,6 +7,7 @@
 // test/version.js provjerava da se broj slaže s package.json.
 (function () {
   const NOTES = [
+    { v: '1.18.2', d: '2026-11-26', t: 'Grupni chat je samo za prijavljene: gosti ga više ne vide i ne mogu sudjelovati.' },
     { v: '1.18.1', d: '2026-11-26', t: 'Kviz: na mobitelu se tipkovnica više ne zatvara dok upisuješ odgovor (kad netko drugi odgovori ili pošalje emoji).' },
     { v: '1.18.0', d: '2026-11-26', t: 'Kviz: oko 1500 novih pitanja (sad ih je preko 2000), a u sobi se pitanje ne ponavlja dok ne prođu gotovo sva ostala.' },
     { v: '1.17.0', d: '2026-11-26', t: 'Kviz: bodovi iz online kvizova skupljaju se na računu (i po kategorijama), uz ljestvicu najboljih.' },

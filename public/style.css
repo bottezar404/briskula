@@ -726,9 +726,6 @@ ul.notes li div { margin-top: 2px; }
 .lc-pick-head .n .muted { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lc-pick-btns { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; margin-top: 8px; }
 .lc-pick-btns .muted { font-size: 13px; }
-.lc-guest { display: flex; align-items: center; gap: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,.1); }
-.lc-guest[hidden], .chat-form[hidden], #lcRoom[hidden] { display: none; }
-.lc-guest .muted { flex: 1; font-size: 13px; }
 #lcRoom { padding: 10px; }
 @media (max-width: 899px), (max-height: 519px) {
   .chat.lobby-chat { height: min(78vh, 600px); height: min(78dvh, 600px); }

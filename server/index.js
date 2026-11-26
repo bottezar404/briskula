@@ -704,6 +704,7 @@ function detach(token, c) {
   const set = online.get(c.uid);
   if (set) { set.delete(token); if (!set.size) online.delete(c.uid); }
   c.uid = null; c.sess = null;
+  c.lobby = false; // grupni chat je samo za prijavljene
   presenceSoon();
 }
 // gdje je korisnik: null (offline), 'menu', 'lobby' ili 'game' (+ soba)
@@ -808,7 +809,7 @@ function dmMessage(m, c, ws, u) {
 const DM_MSGS = new Set(['dmOpen', 'dmRead', 'dmSend']);
 
 // ---------- grupni chat: jedna soba za sve koji su online ----------
-// čitati mogu svi (i gosti), pisati samo prijavljeni (ime i avatar dolaze s računa).
+// samo za prijavljene: gosti ne dobivaju ni poruke ni popis tko je online, i ne mogu pisati.
 // Poruke se čuvaju u bazi (zadnjih 100). LOBBY_ADMINS = korisnička imena (zarezom) koja smiju brisati tuđe poruke.
 const LOBBY_LEN = 200, LOBBY_GAP = 1500, LOBBY_BURST = 6, LOBBY_WIN = 30000;
 const LOBBY_ADMINS = new Set(String(process.env.LOBBY_ADMINS || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean));
@@ -835,12 +836,13 @@ function lobbyUsers(c, ids) {
   const list = Object.values(users);
   return { users, imgs: newImgs(c, list.map(x => x.av)) };
 }
-const lobbySubs = () => [...clients.values()].filter(c => c.ws && c.lobby);
+const lobbySubs = () => [...clients.values()].filter(c => c.ws && c.lobby && c.uid);
 function lobbyMessage(m, c, ws) {
   const err = msg => send(ws, { type: 'error', msg });
   const u = c.uid ? ACC.user(c.uid) : null;
   switch (m.type) {
     case 'lobbyOpen': {
+      if (!u) { c.lobby = false; return send(ws, { type: 'lobbyDenied' }); }
       c.lobby = true;
       const d = ACC.lobbyGet(), w = lobbyWho();
       const ux = lobbyUsers(c, d.m.map(x => x.f).concat(w.who));

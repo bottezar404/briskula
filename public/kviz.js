@@ -241,7 +241,7 @@
   function newEndless(cat, opts) {
     opts = opts || {};
     const g = newGame(0, { rng: opts.rng, clock: opts.clock, qTime: opts.qTime, bank: [] });
-    Object.assign(g, { endless: true, cat, krugNo: 0, recent: [], rng: opts.rng || Math.random, bank: opts.bank || BANK, phase: 'idle', stage: 'idle' });
+    Object.assign(g, { endless: true, cat, krugNo: 0, decks: {}, rng: opts.rng || Math.random, bank: opts.bank || BANK, phase: 'idle', stage: 'idle' });
     return g;
   }
   function newPlayer(name, bot) { return { name, bot: !!bot, score: 0, correct: 0, time: 0, streak: 0, best: 0, ans: null, seen: 0, answered: 0 }; }
@@ -252,22 +252,46 @@
     if (g.last && g.last.fast >= 0) g.last.fast = g.last.fast === p ? -1 : g.last.fast > p ? g.last.fast - 1 : g.last.fast;
     if (g.phase === 'play' && g.players.length && g.players.every(x => x.ans)) reveal(g);
   }
+  // špil pitanja sobe: svako pitanje iz skupa dođe jednom, tek kad se svi potroše, špil se
+  // ponovno izmiješa (a zadnja pitanja prošlog špila idu na dno, da se ne ponove odmah)
+  function draw(g, key, pool, n) {
+    const out = [], ids = new Set(pool.map(q => q.id)), byId = new Map(pool.map(q => [q.id, q]));
+    const D = g.decks || (g.decks = {});
+    const H = D[key + '#'] || []; // nedavno izvučena (idu na dno novog špila)
+    for (let guard = 0; out.length < n && pool.length && guard < 3; guard++) {
+      let d = (D[key] || []).filter(id => ids.has(id) && !out.some(q => q.id === id));
+      if (!d.length) {
+        const recent = new Set(H);
+        const fresh = shuffle(pool.map(q => q.id).filter(id => !out.some(q => q.id === id)), g.rng);
+        d = fresh.filter(id => !recent.has(id)).concat(fresh.filter(id => recent.has(id)));
+      }
+      while (out.length < n && d.length) { const id = d.shift(); out.push(byId.get(id)); H.push(id); }
+      D[key] = d;
+    }
+    D[key + '#'] = H.slice(-Math.floor(pool.length * 0.4));
+    return out;
+  }
   /** novi krug: bodovi od nule, nova pitanja (cat 'mix' = sve kategorije) */
   function newKrug(g) {
-    const rng = g.rng, take = taker(rng, g.recent);
+    const rng = g.rng;
     const pool = g.cat === 'mix' ? g.bank : g.bank.filter(q => q.cat === g.cat);
     let qs;
     if (g.cat === 'mix') {
       // miješano: kategorije se izmjenjuju
       const cats = shuffle(CATS.map(c => c.id), rng), mc = [];
-      for (let k = 0; mc.length < KRUG - KRUG_WRITE && k < KRUG * cats.length; k++) mc.push(...take(pool.filter(q => q.cat === cats[k % cats.length] && !isW(q)), 1));
+      for (let k = 0; mc.length < KRUG - KRUG_WRITE && k < KRUG * cats.length; k++) {
+        const c = cats[k % cats.length];
+        mc.push(...draw(g, c, pool.filter(q => q.cat === c && !isW(q)), 1));
+      }
       qs = mc;
-      for (const q of take(pool.filter(isW), KRUG_WRITE)) qs.splice(1 + Math.floor(rng() * qs.length), 0, q);
-    } else qs = mixRound(take, pool, KRUG, KRUG_WRITE, rng);
+      for (const q of draw(g, 'w', pool.filter(isW), KRUG_WRITE)) qs.splice(1 + Math.floor(rng() * qs.length), 0, q);
+    } else {
+      qs = draw(g, 'c', pool.filter(q => !isW(q)), KRUG - KRUG_WRITE);
+      for (const q of draw(g, 'w', pool.filter(isW), KRUG_WRITE)) qs.splice(1 + Math.floor(rng() * qs.length), 0, q);
+    }
     g.krugNo++;
     g.qs = qs.map((q, k) => makeQ(q, rng, 0, k, 1));
     g.rounds = [{ cat: g.cat, mult: 1, n: g.qs.length }];
-    g.recent = g.recent.concat(g.qs.map(q => q.id)).slice(-Math.floor(pool.length * 0.7));
     g.qi = 0; g.last = null; g.result = null;
     g.players.forEach(pl => Object.assign(pl, newPlayer(pl.name, pl.bot)));
     g.phase = 'collect'; g.stage = 'intro'; g.wait = PAUSE.intro;

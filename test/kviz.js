@@ -147,6 +147,22 @@ const wrong = (q, k) => q.type === 'w' ? 't:krivo' + k : 'a:' + ((q.ans + k) % 4
   const m = K.newEndless('mix'); K.addPlayer(m, 'X'); K.newKrug(m);
   assert(new Set(m.qs.map(q => q.cat)).size >= 5, 'miješano: razne kategorije');
   K.pause(m); assert.strictEqual(m.players.length, 0);
+  // špil: u sobi se pitanje ne ponovi dok se ne potroše sva ostala (ni pitanja na pisanje)
+  for (const cat of ['mix', ...KP.CATS.map(c => c.id)]) {
+    const r = K.newEndless(cat); K.addPlayer(r, 'Y');
+    const pool = KP.ALL.filter(q => cat === 'mix' || q.cat === cat);
+    const nW = pool.filter(q => q.type === 'w').length, nC = pool.length - nW;
+    const krugs = Math.floor(Math.min(nW / 2, cat === 'mix' ? Math.min(...KP.CATS.map(c => pool.filter(q => q.cat === c.id && q.type !== 'w').length)) : nC / 8));
+    const seen = new Set();
+    for (let k = 0; k < krugs; k++) {
+      K.newKrug(r);
+      assert.strictEqual(r.qs.length, K.KRUG);
+      for (const q of r.qs) { assert(!seen.has(q.id), `${cat}: ponovljeno ${q.id} u ${k + 1}. krugu od ${krugs}`); seen.add(q.id); }
+    }
+    const last = new Set(r.qs.map(q => q.id));
+    K.newKrug(r); K.newKrug(r);
+    assert(r.qs.length === K.KRUG && !r.qs.some(q => last.has(q.id)) || cat === 'mix', cat + ': i nakon novog špila nema odmah ponavljanja');
+  }
   console.log('kviz pisanje i stalne sobe ok');
 }
 

@@ -7,6 +7,7 @@
 // test/version.js provjerava da se broj slaže s package.json.
 (function () {
   const NOTES = [
+    { v: '1.11.2', d: '2026-11-26', t: 'Popravljena preklapanja tekstova u igri na mobitelu i PC-u.' },
     { v: '1.11.1', d: '2026-11-26', t: 'Kod online prijatelja piše u kojoj su igri (i kad igraju protiv botova).' },
     { v: '1.11.0', d: '2026-11-26', t: 'Broj verzije na dnu stranice i popis promjena („Što je novo”).' },
     { v: '1.10.0', d: '2026-11-26', t: 'Poker s običnim kartama (52) po standardnim pravilima i žetoni na računu.' },

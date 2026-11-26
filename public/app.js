@@ -824,7 +824,7 @@
         : avatar(who, turn ? 'turn' : '', bubble(p) + turnRing(r, g, p));
       // avatar s oblačićem poruke iznad njega, pa pločica s imenom i bodovima
       return `<div class="pl pl-${p === me ? 'me' : posOf(p, g)}">${av}<div class="nameplate ${turn ? 'turn' : ''}">
-        ${g.mode === 4 ? `<span class="dot t${p % 2}"></span>` : ''}${esc(pl.name)}${off ? ' <span class="off">⚠</span>' : ''} ${pts}</div></div>`;
+        ${g.mode === 4 ? `<span class="dot t${p % 2}"></span>` : ''}<span class="nm">${esc(pl.name)}</span>${off ? ' <span class="off">⚠</span>' : ''} ${pts}</div></div>`;
     };
     const bubble = p => bubbles[p] ? `<div class="bubble ${bubbles[p].team != null ? 'team' : ''} ${bubbles[p].chat ? 'chatb' : ''} ${bubbles[p].akuza ? 'akuza' : ''}">${esc(bubbles[p].text)}</div>` : '';
 
@@ -1015,7 +1015,7 @@
         ? `<span class="avw">${avatar(Object.assign({}, who, { cm: 0 }), turn ? 'turn' : '', bubble(p) + turnRing(r, g, p))}<span class="cml ${who.cm ? '' : 'secret'}" title="Dužina pišulinca">${who.cm ? who.cm + ' cm' : 'tajna'}</span></span>`
         : avatar(who, turn ? 'turn' : '', bubble(p) + turnRing(r, g, p));
       return `<div class="pl pl-${p === me ? 'me' : posOf(p, g)} ${pl.folded || pl.out ? 'folded' : ''}">${av}<div class="nameplate ${turn ? 'turn' : ''}">
-        ${g.dealer === p ? '<span class="dealer" title="Djelitelj">D</span>' : ''}${esc(pl.name)}${off ? ' <span class="off">⚠</span>' : ''} ${pl.out ? '' : chipsHtml(pl.chips)}</div></div>`;
+        ${g.dealer === p ? '<span class="dealer" title="Djelitelj">D</span>' : ''}<span class="nm">${esc(pl.name)}</span>${off ? ' <span class="off">⚠</span>' : ''} ${pl.out ? '' : chipsHtml(pl.chips)}</div></div>`;
     };
     // ispod igrača: zadnji potez i ulog u ovom krugu
     const betPill = p => {

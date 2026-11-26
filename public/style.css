@@ -682,7 +682,7 @@ details.pw summary { cursor: pointer; padding: 6px 0; color: var(--gold); font-w
   .mode4.poker .seat.left, .mode4.poker .seat.right { top: calc(var(--sw) * 1.6 + 74px); }
 }
 @media (max-width: 899px) and (max-height: 700px) {
-  .mode4.poker .pboard { top: 63%; }
+  .mode4.poker .pboard { top: 65%; }
 }
 
 /* ---------- broj verzije i "Što je novo" ---------- */
@@ -694,3 +694,6 @@ ul.notes li { padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,.1); fon
 ul.notes li:last-child { border-bottom: 0; }
 ul.notes li .muted { font-size: 12px; margin-left: 6px; }
 ul.notes li div { margin-top: 2px; }
+/* dugo ime se skrati s „…”, a bodovi/žetoni uz ime uvijek ostanu vidljivi */
+.nameplate .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.nameplate > :not(.nm) { flex: none; }

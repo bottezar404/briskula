@@ -1,6 +1,6 @@
 {
   "name": "briskula",
-  "version": "1.11.1",
+  "version": "1.11.2",
   "description": "Briškula online",
   "main": "server/index.js",
   "scripts": {

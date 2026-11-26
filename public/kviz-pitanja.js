@@ -1,5 +1,6 @@
 /* Kviz „Znalac” – pitanja (dijeli se između preglednika i servera)
  *
+ * Pitanja s ponuđenim odgovorima (Q) i pitanja na pisanje (W, niže).
  * Svako pitanje je tekst: 'Pitanje|točan odgovor|krivi 1|krivi 2|krivi 3'.
  * Redoslijed odgovora se u igri miješa. Oznaka pitanja je 'kategorija:redni broj'
  * (da se ista pitanja ne ponavljaju prečesto), pa nova pitanja dodaji NA KRAJ popisa.
@@ -451,11 +452,155 @@
       'Koliko pravih kutova ima pravokutnik?|4|2|3|1',
     ],
   };
+
+  // pitanja na pisanje: 'Pitanje|odgovor (kako se prikazuje)|drugi prihvaćeni odgovori…'
+  // (velika/mala slova, kvačice i sitne tipfelere provjera ionako prašta)
+  const W = {
+    geo: [
+      'Koji je glavni grad Francuske?|Pariz|Paris',
+      'Koji je glavni grad Italije?|Rim|Roma',
+      'Koji je glavni grad Španjolske?|Madrid',
+      'Koji je glavni grad Njemačke?|Berlin',
+      'Koji je glavni grad Slovenije?|Ljubljana',
+      'Koji je glavni grad Srbije?|Beograd',
+      'Koji je glavni grad Češke?|Prag|Praha',
+      'Koji je glavni grad Rusije?|Moskva',
+      'Koji je glavni grad Kine?|Peking|Beijing',
+      'Koji je glavni grad Švedske?|Stockholm|Stokholm',
+      'Koji je glavni grad Belgije?|Bruxelles|Brisel|Brussels',
+      'Koji je glavni grad Bosne i Hercegovine?|Sarajevo',
+      'Na kojem je kontinentu Brazil?|Južna Amerika|J. Amerika',
+      'Koja je država po površini najveća u Africi?|Alžir',
+      'Koja država ima glavni grad Limu?|Peru',
+      'Koji ocean dijeli Europu od Sjeverne Amerike?|Atlantski ocean|Atlantski|Atlantik',
+    ],
+    pov: [
+      'Koji je grčki pjesnik autor „Ilijade”?|Homer',
+      'Kako se zvala egipatska kraljica, ljubav Marka Antonija?|Kleopatra',
+      'Tko je bio prvi američki predsjednik afričkog podrijetla?|Barack Obama|Obama',
+      'Kako se zvao najveći Kolumbov brod na prvom putovanju?|Santa María|Santa Maria',
+      'Po kojem je moreplovcu Amerika dobila ime?|Amerigo Vespucci|Vespucci|Amerigo',
+      'Tko je vladao Sovjetskim Savezom od Lenjinove smrti do 1953.?|Josif Staljin|Staljin|Stalin',
+      'U kojem je gradu ubijen Julije Cezar?|Rim|Rimu',
+      'Tko je u Europi izumio tisak s pomičnim slovima?|Johannes Gutenberg|Gutenberg',
+      'Koji je narod izgradio Machu Picchu?|Inke|Inka|Inki',
+      'Tko je vodio SSSR kad je pao Berlinski zid?|Mihail Gorbačov|Gorbačov|Gorbachev',
+      'Kako se zvao glavni grad Bizantskog Carstva?|Carigrad|Konstantinopol|Konstantinopolj|Bizant',
+      'Koja je kraljica vladala Engleskom u Shakespeareovo doba?|Elizabeta I.|Elizabeta|Elizabeta Prva',
+      'Kako se zovu skandinavski ratnici koji su plovili drakarima?|Vikinzi|Vikinge|Viking',
+      'Koji je francuski car okrunjen 1804.?|Napoleon|Napoleon Bonaparte|Bonaparte',
+      'Koji je rimski car prema predaji svirao dok je Rim gorio?|Neron|Nero',
+    ],
+    spo: [
+      'U kojem se sportu natječe Luka Modrić?|Nogomet|Nogometu',
+      'Koliko igrača jedne momčadi igra na terenu u košarci?|5|pet',
+      'U kojoj se zemlji igra Wimbledon?|Engleska|Velika Britanija|Ujedinjeno Kraljevstvo|UK',
+      'Koja je reprezentacija osvojila Svjetsko prvenstvo u nogometu 2014.?|Njemačka',
+      'Kako se zove stadion Dinama u Zagrebu?|Maksimir',
+      'Kako se zove stadion Hajduka u Splitu?|Poljud',
+      'U kojem gradu igra FC Bayern?|München|Minhen|Munchen|Munich',
+      'Kako se zove nagrada za najboljeg nogometaša koju dodjeljuje France Football?|Zlatna lopta|Ballon d’Or|Ballon dOr',
+      'Kojim se sportom bavio Dražen Petrović?|Košarka|Košarkom',
+      'Koji sport igra Roger Federer?|Tenis',
+      'Kako se zove najjača nogometna liga u Engleskoj?|Premier League|Premier liga|Premijer liga',
+      'U kojem su gradu održane Ljetne olimpijske igre 2012.?|London|Londonu',
+      'Koliko minuta traje nogometna utakmica bez produžetaka?|90|devedeset',
+      'Koliko igrača jedne ekipe igra u odbojci na terenu?|6|šest',
+      'Kojim se sportom bavi Janica Kostelić?|Skijanje|Skijanjem|Alpsko skijanje',
+    ],
+    glz: [
+      'Kako se zvao pjevač grupe Queen?|Freddie Mercury|Mercury|Freddie',
+      'Tko je otpjevao „Thriller”?|Michael Jackson|Jackson',
+      'Tko je skladao „Malu noćnu glazbu” (Eine kleine Nachtmusik)?|Mozart|Wolfgang Amadeus Mozart',
+      'Kako se zove instrument s 88 crno-bijelih tipki?|Klavir|Glasovir|Piano',
+      'John, Paul, George i … – tko je četvrti Beatles?|Ringo Starr|Ringo',
+      'Iz koje je države grupa ABBA?|Švedska|Švedske',
+      'Koja pjevačica pjeva „Shake It Off”?|Taylor Swift|Taylor',
+      'Koliko žica ima violina?|4|četiri',
+      'Kako se zove grupa koju su osnovali Mick Jagger i Keith Richards?|The Rolling Stones|Rolling Stones|Stonesi',
+      'Na čemu je svirao Ringo Starr?|Bubnjevi|Bubanj|Bubnjeve|Bubnjevima',
+      'Koji je talijanski skladatelj napisao „Četiri godišnja doba”?|Antonio Vivaldi|Vivaldi',
+      'Koji je tenor pjevao „Nessun dorma” na otvaranju SP-a 1990.?|Luciano Pavarotti|Pavarotti',
+      'Koja je grupa snimila „Stairway to Heaven”?|Led Zeppelin|Led Zepelin',
+      'Kojeg pjevača zovu „kralj rock and rolla”?|Elvis Presley|Elvis|Presley',
+    ],
+    fil: [
+      'Kako se zove dječak čarobnjak s ožiljkom u obliku munje?|Harry Potter|Harry|Potter',
+      'Kako se zove žuta obitelj iz Springfielda?|Simpsonovi|Simpsoni|Simpson|Simpsons',
+      'Koji je glumac igrao Terminatora?|Arnold Schwarzenegger|Schwarzenegger|Švarceneger|Arnold',
+      'Tko je režirao film „E.T.”?|Steven Spielberg|Spielberg',
+      'Kako se zove zeleni div iz močvare?|Shrek|Šrek',
+      'Kako se zove najpoznatiji Disneyev miš?|Mickey Mouse|Mickey|Miki|Miki Maus',
+      'Kako se zove grad u kojem živi Batman?|Gotham|Gotham City',
+      'Kako se zove lav, Simbin otac?|Mufasa',
+      'Pod kojim je imenom superjunak poznat Peter Parker?|Spider-Man|Spiderman|Čovjek pauk',
+      'Koji čarobnjak u „Gospodaru prstenova” viče „Nećeš proći!”?|Gandalf',
+      'Kako se zove ribica klaun koju traži otac Marlin?|Nemo',
+      'Tko je glumio Jacka Sparrowa?|Johnny Depp|Depp',
+      'Kako se zove snjegović iz „Snježnog kraljevstva”?|Olaf',
+      'Koji je zeleni Jedi učitelj iz „Ratova zvijezda”?|Yoda|Joda',
+    ],
+    zna: [
+      'Koji je kemijski simbol za srebro?|Ag',
+      'Kako se zove Zemljin prirodni satelit?|Mjesec|Luna',
+      'Tko je otkrio zakon opće gravitacije?|Isaac Newton|Newton',
+      'Koliko je 12 × 12?|144',
+      'Koliko stupnjeva ima pravi kut?|90',
+      'Koji plin udišemo da bismo živjeli?|Kisik|O2',
+      'Koji organ pumpa krv kroz tijelo?|Srce',
+      'Koja je zvijezda najbliža Zemlji?|Sunce',
+      'Koji je kemijski simbol za ugljik?|C',
+      'Kako se zove mladunče krave?|Tele',
+      'Koliko sati ima jedan dan?|24',
+      'Koja je znanstvenica dobila Nobelovu nagradu za fiziku i za kemiju?|Marie Curie|Curie|Marija Curie',
+      'Koja životinja nosi kućicu na leđima i ostavlja trag sluzi?|Puž',
+      'Koja je kemijska formula kuhinjske soli?|NaCl',
+      'Na koliko se °C smrzava voda?|0|nula',
+    ],
+    hrv: [
+      'Koji je glavni grad Hrvatske?|Zagreb',
+      'Kako počinje hrvatska himna?|Lijepa naša domovino|Lijepa naša',
+      'U kojem se gradu nalazi Dioklecijanova palača?|Split|Splitu',
+      'Kako se zove glavni zagrebački trg s kipom bana na konju?|Trg bana Jelačića|Jelačić plac|Jelačićev trg|Trg bana Josipa Jelačića',
+      'Kako se zove najpoznatiji hrvatski nacionalni park s jezerima i slapovima?|Plitvička jezera|Plitvice',
+      'Koji je slavni izumitelj rođen u Smiljanu?|Nikola Tesla|Tesla',
+      'Kako se zvala valuta u Hrvatskoj prije eura?|Kuna|Kune',
+      'Koji se hrvatski grad zove „grad heroj”?|Vukovar',
+      'Kako se zvao prvi hrvatski kralj?|Tomislav|Kralj Tomislav',
+      'Kako se zove rimski amfiteatar u Puli?|Arena|Pulska arena',
+      'Tko je napisao „Juditu”?|Marko Marulić|Marulić',
+      'Tko je izumio mehaničku olovku?|Slavoljub Penkala|Penkala',
+      'Koja je najduža hrvatska planina?|Velebit',
+      'Koji je otok poznat po paškom siru?|Pag',
+      'Kako se zove viteška igra koja se svake godine održava u Sinju?|Alka|Sinjska alka',
+    ],
+    opc: [
+      'Koliko dana ima tjedan?|7|sedam',
+      'Koliko je 9 × 9?|81',
+      'Koja boja nastaje miješanjem crvene i bijele?|Ružičasta|Roza',
+      'Koji je renesansni umjetnik naslikao „Mona Lisu”?|Leonardo da Vinci|Leonardo|da Vinci',
+      'Koliko mjeseci ima godina?|12|dvanaest',
+      'Koji je prvi mjesec u godini?|Siječanj|Januar',
+      'Koje je voće žuto i izduženo, a majmuni ga vole?|Banana',
+      'Koliko stranica ima trokut?|3|tri',
+      'Koja je valuta u Hrvatskoj od 2023.?|Euro|EUR|€',
+      'Koji je engleski pisac autor „Romea i Julije”?|William Shakespeare|Shakespeare|Šekspir',
+      'Kako se rimskim brojem piše 10?|X',
+      'U kojem je gradu Eiffelov toranj?|Pariz|Paris|Parizu',
+      'Koliko minuta ima jedan sat?|60|šezdeset',
+      'Koje godišnje doba dolazi nakon zime?|Proljeće',
+    ],
+  };
   // [{ id, cat, text, opts: [točan, krivi, krivi, krivi] }]
+  // pitanja na pisanje: { id, cat, type: 'w', text, answer, accept: [...] }
   const ALL = [];
   for (const c of CATS) (Q[c.id] || []).forEach((s, i) => {
     const [text, ...opts] = s.split('|');
     ALL.push({ id: c.id + ':' + i, cat: c.id, text, opts });
+  });
+  for (const c of CATS) (W[c.id] || []).forEach((s, i) => {
+    const [text, ...acc] = s.split('|');
+    ALL.push({ id: c.id + ':w' + i, cat: c.id, type: 'w', text, answer: acc[0], accept: acc });
   });
   return { CATS, ALL };
 });

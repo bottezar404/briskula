@@ -30,6 +30,12 @@
     const span = L.max - L.min;
     let f = L.min + span * (sure ? rng() * 0.7 : 0.35 + rng() * 0.75);
     const delay = Math.round(g.qTime * f);
+    if (q.type === 'w') {
+      // pisanje traje dulje; tko ne zna, upiše nešto drugo (odgovor s nekog drugog pitanja)
+      const others = K.BANK.filter(x => x.type === 'w' && x.cat === q.cat && x.answer !== q.answer);
+      const guess = others.length ? others[Math.floor(rng() * others.length)].answer : '?';
+      return { delay: Math.round(Math.min(0.95, f + 0.2) * g.qTime), move: 't:' + (sure ? q.answer : guess) };
+    }
     const wrong = [0, 1, 2, 3].filter(i => i !== q.ans);
     // i kad ne zna, ponekad pogodi (1 od 4)
     const c = sure ? q.ans : rng() < 0.25 ? q.ans : wrong[Math.floor(rng() * 3)];

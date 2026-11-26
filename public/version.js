@@ -7,6 +7,7 @@
 // test/version.js provjerava da se broj slaže s package.json.
 (function () {
   const NOTES = [
+    { v: '1.15.0', d: '2026-11-26', t: 'Kviz: stalne sobe (Miješano i po kategorijama) u koje se ulazi bilo kad, i pitanja na pisanje.' },
     { v: '1.14.0', d: '2026-11-26', t: 'Nova igra: kviz Znalac (414 pitanja, 3 runde, brži točan odgovor nosi više bodova), s botovima ili online.' },
     { v: '1.13.0', d: '2026-11-26', t: 'Nova igra: Čovječe ne ljuti se (2–4 igrača, s botovima ili online s prijateljima).' },
     { v: '1.12.0', d: '2026-11-26', t: 'Grupni chat za sve koji su online: piši svima, pozovi ih u svoju sobu ili dodaj za prijatelja klikom na ime.' },

@@ -900,3 +900,34 @@ ul.notes li div { margin-top: 2px; }
   .seg[data-seg="kind"], .seg[data-seg="roomKind"] { flex-wrap: wrap; }
   .seg[data-seg="kind"] button, .seg[data-seg="roomKind"] button { flex: 1 0 30%; }
 }
+/* kviz: stalne sobe, pitanja na pisanje, poredak s više igrača */
+.kv-rooms { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.kv-room { min-width: 0; }
+.kv-room { display: flex; align-items: center; gap: 7px; padding: 9px 9px; border-radius: 11px; background: rgba(255,255,255,.1); color: var(--cream); font-weight: 600; font-size: 14px; text-align: left; }
+.kv-room.mix { grid-column: 1 / -1; background: rgba(229,199,122,.22); }
+.kv-ri { font-size: 18px; } .kv-rn2 { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kv-rc { font-size: 12px; opacity: .6; white-space: nowrap; } .kv-rc.on { opacity: 1; color: var(--gold); font-weight: 800; }
+.kv-w { background: #2f78d0; color: #fff; border-radius: 6px; padding: 1px 6px; font-size: 12px; white-space: nowrap; }
+.kv-form { display: flex; gap: 8px; }
+.kv-form input { flex: 1; min-width: 0; font-size: 18px; background: var(--cream); color: var(--ink); border: 0; border-radius: 12px; padding: 12px 14px; user-select: text; -webkit-user-select: text; }
+.kv-form input::placeholder { color: #8a7d68; }
+.kv-form button { flex: none; }
+.kv-typed, .kv-answer { text-align: center; padding: 12px; border-radius: 12px; background: rgba(0,0,0,.25); font-size: 17px; }
+.kv-answer { background: #3fae5f; color: #fff; animation: kv-pop .35s ease-out; }
+.kv-typedlist { list-style: none; padding: 0; margin: 8px 0 0; display: flex; flex-wrap: wrap; gap: 5px; justify-content: center; }
+.kv-typedlist li { font-size: 13px; padding: 3px 8px; border-radius: 8px; background: rgba(0,0,0,.3); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kv-typedlist li.ok { background: rgba(63,174,95,.85); } .kv-typedlist li.bad { background: rgba(196,71,59,.8); }
+.kv-pls.n5 { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); max-height: 34vh; overflow-y: auto; padding-top: 2px; }
+.kv-row { position: relative; display: flex; align-items: center; gap: 6px; padding: 5px 8px; border-radius: 10px; background: rgba(0,0,0,.2); min-width: 0; }
+.kv-row.mine { box-shadow: inset 0 0 0 1px rgba(229,199,122,.6); }
+.kv-row .kv-nm { flex: 1; min-width: 0; }
+.kv-row .kv-chip { position: static; }
+.kv-row .av { --s: 26px; }
+.kv-row .av .bubble { left: 0; translate: none; }
+@media (min-width: 900px) and (min-height: 520px) {
+  .kv-form input { font-size: 20px; padding: 14px 16px; }
+}
+.kv-say { flex: 0 1 auto; min-width: 0; max-width: 55%; font-size: 12px; font-weight: 600; background: var(--cream); color: var(--ink); border-radius: 8px; padding: 1px 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; animation: pop .25s ease-out; }
+.kv-row .kv-nm { flex: 1 1 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 899px) { .kv-wt { display: none; } }
+.kv-pls.n1 { grid-template-columns: minmax(0, 170px); justify-content: center; }

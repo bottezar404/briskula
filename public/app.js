@@ -44,7 +44,7 @@
   const S = {
     name: store.get('name', ''),
     showPoints: store.get('showPoints', true),
-    showCm: store.get('showCm', true), // dužina pišulinca ispod avatara u igri
+    showSt: store.get('showSt', true), // kratka statistika (pobjede) ispod avatara u igri
     sound: store.get('sound', true),
     botMode: store.get('botMode', 2), botLevel: store.get('botLevel', 'normal'),
     onMode: store.get('onMode', 2),
@@ -53,14 +53,12 @@
     kind: store.get('kind', store.get('low', false) ? 'meno' : 'briskula'),
     naManje: store.get('naManje', store.get('kind', null) === 'meno' || (store.get('kind', null) == null && store.get('low', false)) ? 1 : 0),
     target: store.get('target', 41), // trešeta: do koliko bodova
-    // profil: generički avatar 'eN' ili 'img' (vlastita slika), te "dužina pišulinca" u cm (0 = tajna)
+    // profil: generički avatar 'eN' ili 'img' (vlastita slika)
     avatar: store.get('avatar', 'e' + Math.floor(Math.random() * AV.N)),
     avatarImg: store.get('avatarImg', ''),
-    cm: store.get('cm', 0),
     turnTime: store.get('turnTime', 30), // online: sekunde za potez (0 = bez ograničenja)
   };
   if (!/^e\d{1,2}$/.test(S.avatar) && !(S.avatar === 'img' && S.avatarImg)) S.avatar = 'e0';
-  S.cm = Math.max(0, Math.min(50, Math.round(+S.cm) || 0));
   if (!KIND_NAMES[S.kind]) S.kind = 'briskula'; // stari 'meno' = briškula na manje
   S.naManje = S.naManje ? 1 : 0;
   if (![21, 31, 41].includes(S.target)) S.target = 41;
@@ -69,15 +67,29 @@
   function save() { for (const k in S) store.set(k, S[k]); syncProfile(); }
 
   // ---------- avatari ----------
-  const CM_MAX = 50;
   const imgCache = {}; // id -> data URL (slike igrača koje je poslao server)
   const myAv = () => S.avatar === 'img' && S.avatarImg ? (imgCache.me = S.avatarImg, 'i:me') : S.avatar;
-  const profileMsg = () => Object.assign({ type: 'profile', name: S.name, cm: S.cm }, S.avatar === 'img' && S.avatarImg ? { av: 'img', img: S.avatarImg } : { av: S.avatar });
-  const cmText = cm => cm ? cm + ' cm' : 'tajna 🤫';
-  const botCm = () => 1 + Math.floor(Math.random() * CM_MAX);
+  const profileMsg = () => Object.assign({ type: 'profile', name: S.name }, S.avatar === 'img' && S.avatarImg ? { av: 'img', img: S.avatarImg } : { av: S.avatar });
   function avatar(seat, cls, extra) {
     if (!seat) return `<span class="av ${cls || ''} empty"></span>`;
-    return `<span class="av ${cls || ''}">${AV.inner(seat.av, imgCache, seat.name)}${seat.cm ? `<span class="cmb" title="Dužina pišulinca">${seat.cm}<small>cm</small></span>` : ''}${extra || ''}</span>`;
+    return `<span class="av ${cls || ''}">${AV.inner(seat.av, imgCache, seat.name)}${extra || ''}</span>`;
+  }
+  // statistika: zbroj svih igara (online + botovi) – partije, pobjede, odigrano vrijeme (ms)
+  function statSum(stats) {
+    const r = { p: 0, w: 0, t: 0 };
+    for (const sec of ['online', 'bots']) for (const x of Object.values((stats && stats[sec]) || {})) { r.p += x.p || 0; r.w += x.w || 0; r.t += x.t || 0; }
+    return r;
+  }
+  const fmtTime = ms => { const m = Math.floor((+ms || 0) / 60000); return m < 60 ? m + ' min' : Math.floor(m / 60) + ' h' + (m % 60 ? ' ' + (m % 60) + ' min' : ''); };
+  const fmtHours = ms => { const h = (+ms || 0) / 3600e3; return h < 1 ? fmtTime(ms) : (h < 10 ? h.toFixed(1).replace('.', ',') : Math.round(h)) + ' h'; };
+  const stTitle = st => `Pobjeda: ${st.w} · Partija: ${st.p} · Odigrano: ${fmtTime(st.t)}`;
+  // avatar u igri s pločicom ispod: broj pobjeda (prijavljeni), "bot" ili "gost"
+  function avWrap(who, cls, extra) {
+    if (!S.showSt) return avatar(who, cls, extra);
+    const lab = who.bot ? '<span class="cml secret">bot</span>'
+      : who.st ? `<span class="cml" title="${stTitle(who.st)}">🏆 ${who.st.w}</span>`
+      : '<span class="cml secret" title="Gost (nije prijavljen)">gost</span>';
+    return `<span class="avw">${avatar(who, cls, extra)}${lab}</span>`;
   }
 
   // ---------- korisnički račun (nije obavezan: bez prijave se igra kao gost) ----------
@@ -109,7 +121,6 @@
       // nakon prijave profil dolazi iz računa (isti na svim uređajima)
       const u = m.user;
       if (u.name) S.name = u.name;
-      S.cm = Math.max(0, Math.min(CM_MAX, +u.cm || 0));
       if (u.av === 'img' && u.img) { S.avatarImg = u.img; S.avatar = 'img'; }
       else if (/^e\d{1,2}$/.test(u.av || '')) S.avatar = u.av;
       profSent = JSON.stringify(profileMsg());
@@ -150,8 +161,8 @@
     ctrl = getNet(); ctrl.send(profileMsg()); ctrl.send({ type: 'join', code });
   }
   // partija protiv botova: rezultat se javi serveru za statistiku (samo kad je igrač prijavljen)
-  function reportBotGame(kind, low, res, mode) {
-    if (loggedIn() && net) net.send({ type: 'stat', kind, low: !!low, res, mode });
+  function reportBotGame(kind, low, res, mode, ms) {
+    if (loggedIn() && net) net.send({ type: 'stat', kind, low: !!low, res, mode, ms: Math.round(ms || 0) });
   }
   // žetoni na računu (poker): 5.000
   const fmtChips = n => Math.round(+n || 0).toLocaleString('hr-HR');
@@ -212,7 +223,6 @@
       const botNames = ['Jure', 'Mare', 'Ante', 'Luce', 'Frane', 'Tonka'].sort(() => Math.random() - .5);
       this.names = [name || 'Ti'].concat(botNames.slice(0, mode - 1).map(n => 'Bot ' + n));
       this.avs = this.names.map((n, i) => i ? AV.forName(n) : null);
-      this.cms = this.names.map((n, i) => i ? botCm() : 0); // botovi: nasumično, isto cijelu partiju
       this.wins = Array(mode === 4 && !solo(this.kind) ? 2 : mode).fill(0);
       this.signals = []; this.dealer = Math.floor(Math.random() * mode) - 1;
       this.start();
@@ -232,14 +242,14 @@
       const kvUsed = this.kind === 'kviz' ? store.get('kvUsed', []) : undefined;
       this.st = this.E.newGame(this.mode, { names: this.names, bots: this.names.map((_, i) => i > 0), dealer: this.dealer, low: this.low, target: this.target, blindEvery: this.tour ? TOUR_BLINDS : undefined, exclude: kvUsed });
       if (this.kind === 'kviz') store.set('kvUsed', kvUsed.concat(this.st.qs.map(q => q.id)).slice(-800));
-      this.counted = false;
+      this.counted = false; this.t0 = Date.now(); // trajanje partije (sati igranja u statistici)
       this.signals = [];
       this.emit(); this.schedule();
     }
     view() {
       return {
         type: 'room', local: true, code: null, mode: this.mode, level: this.level, low: this.low, kind: this.kind, target: this.target, host: true, you: 0, wins: this.wins, tour: this.tour,
-        seats: this.names.map((n, i) => ({ name: n, bot: i > 0, connected: true, av: i ? this.avs[i] : myAv(), cm: i ? this.cms[i] : S.cm })),
+        seats: this.names.map((n, i) => ({ name: n, bot: i > 0, connected: true, av: i ? this.avs[i] : myAv(), st: i || !loggedIn() ? null : statSum(acc.user.stats) })),
         game: this.E.viewFor(this.st, 0), signals: this.signals.slice(-6),
       };
     }
@@ -250,7 +260,7 @@
         this.counted = true;
         if (!st.result.draw) this.wins[sideOf(this.kind, this.mode, st.result.winners[0])]++;
         if (this.tour && !this.tour.done) TR.record(this.tour, this.kind, st.result);
-        reportBotGame(this.kind, this.low, st.result.draw ? 'd' : st.result.winners.includes(0) ? 'w' : 'l', this.mode);
+        reportBotGame(this.kind, this.low, st.result.draw ? 'd' : st.result.winners.includes(0) ? 'w' : 'l', this.mode, Date.now() - this.t0);
         if (this.tour && this.tour.done) {
           const sd = TR.standings(this.tour);
           reportBotGame('turnir', false, sd.every(x => x.place === 1) ? 'd' : sd.find(x => x.p === 0).place === 1 ? 'w' : 'l');
@@ -560,7 +570,7 @@
     const head = f.id + ':' + f.name + ':' + f.av + ':' + friendWhere(f);
     if (dm.head !== head) {
       dm.head = head;
-      dm.el.querySelector('#dmAv').innerHTML = avatar({ av: f.av, name: f.name, cm: 0 }, '', `<span class="pres ${f.at ? 'on' : ''}"></span>`);
+      dm.el.querySelector('#dmAv').innerHTML = avatar({ av: f.av, name: f.name }, '', `<span class="pres ${f.at ? 'on' : ''}"></span>`);
       dm.el.querySelector('#dmName').textContent = f.name;
       dm.el.querySelector('#dmSub').textContent = friendWhere(f);
     }
@@ -587,7 +597,7 @@
   const lobby = { open: false, sub: false, loaded: false, msgs: [], users: {}, who: [], guests: 0, read: +store.get('lobbyRead', 0) || 0, view: 'chat', pick: null, el: null, key: '', fkey: '' };
   const lobbyShown = () => lobby.open && loggedIn() && !window.BRK_OFFLINE && (!room || !room.game);
   function lobbyReset() { lobby.sub = false; lobby.open = false; lobby.loaded = false; lobby.msgs = []; lobby.who = []; lobby.users = {}; lobby.pick = null; lobby.key = ''; }
-  const lobbyUser = id => lobby.users[id] || { id, name: 'Igrač', uname: '', av: 'e0', cm: 0 };
+  const lobbyUser = id => lobby.users[id] || { id, name: 'Igrač', uname: '', av: 'e0' };
   function lobbySub() {
     if (window.BRK_OFFLINE || lobby.sub || !loggedIn()) return;
     lobby.sub = true; getNet().send({ type: 'lobbyOpen' });
@@ -648,7 +658,7 @@
       if (f.at && f.at.where !== 'game' && !(room && f.at.code === room.code)) btns += `<button class="small" data-lc="invite">Pozovi u igru</button>`;
     }
     return `<div class="lc-pick">
-      <div class="lc-pick-head">${avatar({ av: u.av, name: u.name, cm: u.cm }, 'md', on ? '<span class="pres on"></span>' : '')}
+      <div class="lc-pick-head">${avatar({ av: u.av, name: u.name }, 'md', on ? '<span class="pres on"></span>' : '')}
         <span class="n"><b>${esc(u.name)}</b><span class="muted">${esc(u.uname)}${f && f.status === 'ok' ? ' · prijatelj/ica' : ''}${f && f.status === 'ok' && f.at ? ' · ' + esc(friendWhere(f)) : on ? ' · online' : ''}</span></span>
         <button class="ghost small" data-lc="unpick" aria-label="Zatvori">✕</button></div>
       <div class="lc-pick-btns">${btns}</div></div>`;
@@ -730,7 +740,7 @@
       const isF = id => acc.friends.some(f => f.id === id && f.status === 'ok');
       const ids = lobby.who.slice().sort((a, b) => (b === me) - (a === me) || isF(b) - isF(a) || lobbyUser(a).name.localeCompare(lobbyUser(b).name, 'hr'));
       list.innerHTML = `<p class="muted lc-who-head">Online: ${lobby.who.length} ${lobby.who.length === 1 ? 'prijavljeni' : 'prijavljenih'}${lobby.guests ? ` i ${lobby.guests} ${lobby.guests === 1 ? 'gost' : 'gostiju'}` : ''}</p>
-        <ul class="lc-who">${ids.map(id => { const u = lobbyUser(id); return `<li><button class="lc-u" data-lu="${id}">${avatar({ av: u.av, name: u.name, cm: 0 }, 'xs', '<span class="pres on"></span>')}<b>${esc(u.name)}</b>${id === me ? ' <span class="muted">(ti)</span>' : isF(id) ? ' <span class="tag">prijatelj</span>' : ''}</button></li>`; }).join('')}</ul>
+        <ul class="lc-who">${ids.map(id => { const u = lobbyUser(id); return `<li><button class="lc-u" data-lu="${id}">${avatar({ av: u.av, name: u.name }, 'xs', '<span class="pres on"></span>')}<b>${esc(u.name)}</b>${id === me ? ' <span class="muted">(ti)</span>' : isF(id) ? ' <span class="tag">prijatelj</span>' : ''}</button></li>`; }).join('')}</ul>
         <p class="muted lc-who-head">Klikni na ime da dodaš prijatelja ili pozoveš u igru.</p>`;
       return;
     }
@@ -739,7 +749,7 @@
         const u = lobbyUser(x.f), mine = x.f === me;
         const del = mine || admin ? `<button class="lc-del" data-lc="del" data-id="${x.id}" aria-label="Obriši poruku" title="Obriši">✕</button>` : '';
         const join = x.code ? `<button class="small lc-join" data-lc="rjoin" data-code="${esc(x.code)}"${room && room.code === x.code ? ' disabled' : ''}>${room && room.code === x.code ? 'Tvoja soba ' : 'Uđi u sobu '}${esc(x.code)}</button>` : '';
-        return `<div class="msg ${mine ? 'mine' : ''}"><div class="who"><button class="lc-u" data-lu="${u.id}">${avatar({ av: u.av, name: u.name, cm: 0 }, 'xs')}${mine ? 'Ti' : esc(u.name)}</button> <span class="t">${dmTime(x.at)}</span>${del}</div><div class="txt">${esc(x.t)}${join}</div></div>`;
+        return `<div class="msg ${mine ? 'mine' : ''}"><div class="who"><button class="lc-u" data-lu="${u.id}">${avatar({ av: u.av, name: u.name }, 'xs')}${mine ? 'Ti' : esc(u.name)}</button> <span class="t">${dmTime(x.at)}</span>${del}</div><div class="txt">${esc(x.t)}${join}</div></div>`;
       }).join('') : '<p class="muted chat-empty">Još nema poruka. Pozdravi sve koji su online!</p>';
     if (atBottom || (lobby.msgs.length && lobby.msgs[lobby.msgs.length - 1].f === me)) list.scrollTop = list.scrollHeight;
   }
@@ -791,14 +801,7 @@
           <button class="av-pick" id="avBtn" aria-label="Odaberi avatar">${avatar({ av: myAv(), name: S.name }, 'lg')}<span class="pen">✎</span></button>
           <input id="name" maxlength="20" placeholder="Tvoje ime" value="${esc(S.name)}">
         </div>
-        <div class="cm-row">
-          <div class="cm-head"><span>Dužina pišulinca</span><b id="cmVal">${cmText(S.cm)}</b></div>
-          <div class="cm-ctl">
-            <button class="ghost small" data-cm="-1" aria-label="Manje">−</button>
-            <input type="range" id="cm" min="0" max="${CM_MAX}" step="1" value="${S.cm}" aria-label="Dužina pišulinca u cm">
-            <button class="ghost small" data-cm="1" aria-label="Više">+</button>
-          </div>
-        </div>
+        ${window.BRK_OFFLINE ? '' : profStatsHtml()}
         ${window.BRK_OFFLINE ? '' : accountRow()}
       </div>
       <div class="panel">
@@ -838,10 +841,8 @@
     const nameEl = $app.querySelector('#name');
     nameEl.oninput = () => { S.name = nameEl.value.trim(); save(); };
     $app.querySelector('#avBtn').onclick = () => { modal = 'avatar'; render(); };
-    const cmEl = $app.querySelector('#cm'), cmVal = $app.querySelector('#cmVal');
-    const setCm = v => { S.cm = Math.max(0, Math.min(CM_MAX, v)); cmEl.value = S.cm; cmVal.textContent = cmText(S.cm); save(); };
-    cmEl.oninput = () => setCm(+cmEl.value);
-    $app.querySelectorAll('[data-cm]').forEach(b => b.onclick = () => setCm(S.cm + +b.dataset.cm));
+    const psb = $app.querySelector('#profStats');
+    if (psb) psb.onclick = () => { if (loggedIn()) { modal = 'stats'; net && net.send({ type: 'account' }); } else { modal = 'account'; acc.err = ''; } render(); };
     bindSegs();
     const needName = () => { if (!S.name) { S.name = 'Igrač' + Math.floor(Math.random() * 900 + 100); save(); } };
     $app.querySelector('#playBots').onclick = () => {
@@ -898,7 +899,7 @@
         <h2>Igrači</h2>
         <ul class="seats">${r.seats.map((s, i) => `<li>
           ${avatar(s, 'md')}
-          <span class="n">${s ? esc(s.name) + (i === r.you ? ' (ti)' : '') : '<span class="muted">čeka se igrač…</span>'}${s && s.cm ? `<span class="cmt">Dužina pišulinca: ${s.cm} cm</span>` : ''}${s && s.wallet != null && (r.kind === 'poker' || r.tour) ? `<span class="cmt">${walletHtml(s.wallet)}</span>` : ''}</span>
+          <span class="n">${s ? esc(s.name) + (i === r.you ? ' (ti)' : '') : '<span class="muted">čeka se igrač…</span>'}${s && s.st ? `<span class="cmt">🏆 ${s.st.w} pobjeda · ⏱ ${fmtHours(s.st.t)} odigrano</span>` : ''}${s && s.wallet != null && (r.kind === 'poker' || r.tour) ? `<span class="cmt">${walletHtml(s.wallet)}</span>` : ''}</span>
           ${r.mode === 4 && !solo(r.kind) ? `<span class="tag team${i % 2}">${i % 2 ? 'Par B' : 'Par A'}</span>` : ''}
           ${r.kind === 'covjece' ? `<span class="cj-dot c${CJ.COLORS[r.mode][i]}" title="${CJ.COLOR_NAMES[CJ.COLORS[r.mode][i]]}"></span>` : ''}
           ${s && s.bot ? '<span class="tag">bot</span>' : ''}
@@ -1061,9 +1062,7 @@
       // u parovima bodovi nisu po igraču nego zajedno za par (vidi pairBox)
       const pts = g.mode === 4 || secret ? '' : S.showPoints ? `<span class="pts">${ptsText(g, pl.points)}</span>` : `<span class="muted">${pl.wonCount}</span>`;
       const who = seat || { name: pl.name };
-      const av = S.showCm
-        ? `<span class="avw">${avatar(Object.assign({}, who, { cm: 0 }), turn ? 'turn' : '', bubble(p) + turnRing(r, g, p))}<span class="cml ${who.cm ? '' : 'secret'}" title="Dužina pišulinca">${who.cm ? who.cm + ' cm' : 'tajna'}</span></span>`
-        : avatar(who, turn ? 'turn' : '', bubble(p) + turnRing(r, g, p));
+      const av = avWrap(who, turn ? 'turn' : '', bubble(p) + turnRing(r, g, p));
       // avatar s oblačićem poruke iznad njega, pa pločica s imenom i bodovima
       return `<div class="pl pl-${p === me ? 'me' : posOf(p, g)}">${av}<div class="nameplate ${turn ? 'turn' : ''}">
         ${g.mode === 4 ? `<span class="dot t${p % 2}"></span>` : ''}<span class="nm">${esc(pl.name)}</span>${off ? ' <span class="off">⚠</span>' : ''} ${pts}</div></div>`;
@@ -1253,9 +1252,7 @@
       const off = seat && !seat.bot && !seat.connected;
       const turn = g.phase === 'play' && g.turn === p;
       const who = seat || { name: pl.name };
-      const av = S.showCm
-        ? `<span class="avw">${avatar(Object.assign({}, who, { cm: 0 }), turn ? 'turn' : '', bubble(p) + turnRing(r, g, p))}<span class="cml ${who.cm ? '' : 'secret'}" title="Dužina pišulinca">${who.cm ? who.cm + ' cm' : 'tajna'}</span></span>`
-        : avatar(who, turn ? 'turn' : '', bubble(p) + turnRing(r, g, p));
+      const av = avWrap(who, turn ? 'turn' : '', bubble(p) + turnRing(r, g, p));
       return `<div class="pl pl-${p === me ? 'me' : posOf(p, g)} ${pl.folded || pl.out ? 'folded' : ''}">${av}<div class="nameplate ${turn ? 'turn' : ''}">
         ${g.dealer === p ? '<span class="dealer" title="Djelitelj">D</span>' : ''}<span class="nm">${esc(pl.name)}</span>${off ? ' <span class="off">⚠</span>' : ''} ${pl.out ? '' : chipsHtml(pl.chips)}</div></div>`;
     };
@@ -1498,9 +1495,7 @@
       const turn = (g.phase === 'play' || g.phase === 'collect') && g.turn === p;
       const who = seat || { name: pl.name };
       const corner = cjCorner(g, pl.color);
-      const av = S.showCm
-        ? `<span class="avw">${avatar(Object.assign({}, who, { cm: 0 }), turn ? 'turn' : '', bubble(p) + turnRing(r, g, p))}<span class="cml ${who.cm ? '' : 'secret'}" title="Dužina pišulinca">${who.cm ? who.cm + ' cm' : 'tajna'}</span></span>`
-        : avatar(who, turn ? 'turn' : '', bubble(p) + turnRing(r, g, p));
+      const av = avWrap(who, turn ? 'turn' : '', bubble(p) + turnRing(r, g, p));
       return `<div class="cj-pl ${corner}"><div class="pl ${corner === 'tr' || corner === 'br' ? 'pl-right' : 'pl-left'}">${av}<div class="nameplate ${turn ? 'turn' : ''}">
         <span class="cj-dot c${pl.color}"></span><span class="nm">${p === me ? 'Ti' : esc(pl.name)}</span>${off ? ' <span class="off">⚠</span>' : ''}<span class="cj-home" title="Figure u cilju">${pl.home}/4</span></div></div></div>`;
     };
@@ -1619,7 +1614,7 @@
   }
   // tko je odabrao koji odgovor (nakon zatvaranja pitanja)
   function kvPickers(r, g, i) {
-    return g.players.map((pl, p) => pl.ans && pl.ans.c === i ? avatar(Object.assign({}, r.seats[p] || { name: pl.name }, { cm: 0 }), 'xs') : '').join('');
+    return g.players.map((pl, p) => pl.ans && pl.ans.c === i ? avatar(r.seats[p] || { name: pl.name }, 'xs') : '').join('');
   }
   // zamijeni sadržaj elementa novim HTML-om, ali element koji odgovara `keep` (i njegove roditelje)
   // ostavi na mjestu: mijenja se samo ono što se stvarno promijenilo
@@ -1666,11 +1661,9 @@
       let chip = '';
       if (open) chip = pl.done ? '<span class="kv-chip done">✓</span>' : '<span class="kv-chip wait">…</span>';
       else if (rev) chip = pl.ans ? (pl.ans.ok ? `<span class="kv-chip ok">+${kvPts(pl.ans.pts)}</span>` : '<span class="kv-chip bad">✗</span>') : '<span class="kv-chip none">–</span>';
-      const av = S.showCm
-        ? `<span class="avw">${avatar(Object.assign({}, seat, { cm: 0 }), open && !pl.done ? 'turn' : '', bubble(p))}<span class="cml ${seat.cm ? '' : 'secret'}" title="Dužina pišulinca">${seat.cm ? seat.cm + ' cm' : 'tajna'}</span></span>`
-        : avatar(seat, open && !pl.done ? 'turn' : '', bubble(p));
+      const av = avWrap(seat, open && !pl.done ? 'turn' : '', bubble(p));
       // puno igrača: redak u poretku, poruka se vidi u retku (oblačić bi se odrezao)
-      if (g.mode > 4) return `<div class="kv-row ${p === me ? 'mine' : ''} ${pl.score === lead && lead > 0 ? 'lead' : ''}">${avatar(Object.assign({}, seat, { cm: 0 }), 'xs')}
+      if (g.mode > 4) return `<div class="kv-row ${p === me ? 'mine' : ''} ${pl.score === lead && lead > 0 ? 'lead' : ''}">${avatar(seat, 'xs')}
         <span class="kv-nm">${p === me ? 'Ti' : esc(pl.name)}${off ? ' <span class="off">⚠</span>' : ''}</span>${bubbles[p] ? `<span class="kv-say">${esc(bubbles[p].text)}</span>` : ''}${chip}<span class="kv-sc">${kvPts(pl.score)}</span></div>`;
       return `<div class="kv-pl ${p === me ? 'mine' : ''} ${pl.score === lead && lead > 0 ? 'lead' : ''}">${av}
         <div class="kv-nm">${p === me ? 'Ti' : esc(pl.name)}${off ? ' <span class="off">⚠</span>' : ''}</div>
@@ -1857,7 +1850,7 @@
     const title = res.draw && res.winners.includes(me) ? 'Neriješeno!' : myPlace === 1 ? 'Pobijedio/la si!' : placeText(myPlace);
     const rows = res.place.map((p, k) => {
       const s = res.scores[p], seat = r.seats[p] || { name: g.players[p].name };
-      return `<tr class="${res.winners.includes(p) ? 'win' : ''}"><td><span class="kv-rk">${k + 1}.</span> ${avatar(Object.assign({}, seat, { cm: 0 }), 'xs')} ${esc(g.players[p].name)}${p === me ? ' (ti)' : ''}
+      return `<tr class="${res.winners.includes(p) ? 'win' : ''}"><td><span class="kv-rk">${k + 1}.</span> ${avatar(seat, 'xs')} ${esc(g.players[p].name)}${p === me ? ' (ti)' : ''}
         <div class="muted ak">točno ${s.correct}/${res.total}${s.correct ? ` · prosjek ${kvSec(s.time / s.correct)}` : ''}${s.best >= 3 ? ` · niz ${s.best}` : ''}</div></td><td>${kvPts(s.points)}</td></tr>`;
     }).join('');
     const tally = 'Pobjede: ' + r.seats.map((s, i) => esc(s.name) + ' ' + (r.wins[i] || 0)).join(' · ');
@@ -1992,6 +1985,16 @@
   }
 
   // ---------- račun: red u izborniku i prozori ----------
+  // izbornik: kratka statistika ispod imena (umjesto nekadašnje "dužine pišulinca")
+  function profStatsHtml() {
+    if (!loggedIn()) return `<button class="prof-stats guest" id="profStats"><span>📊 Prijavi se i skupljaj statistiku: pobjede, partije i sate igranja</span></button>`;
+    const x = statSum(acc.user.stats);
+    return `<button class="prof-stats" id="profStats" title="Otvori statistiku">
+      <span><b>🏆 ${x.w}</b><small>pobjeda</small></span>
+      <span><b>🃏 ${x.p}</b><small>partija</small></span>
+      <span><b>⏱ ${fmtHours(x.t)}</b><small>odigrano</small></span>
+    </button>`;
+  }
   function accountRow() {
     if (!loggedIn()) return `<div class="acc-row guest"><span class="muted">Igraš kao gost</span><button class="small" id="accBtn">Prijava / registracija</button></div>`;
     const fc = friendCounts();
@@ -2013,8 +2016,8 @@
     if (loggedIn()) {
       const u = acc.user;
       return `<h2>Moj račun</h2>
-        <div class="acc-head">${avatar({ av: myAv(), name: S.name, cm: S.cm }, 'lg')}<div><b>${esc(S.name || u.name)}</b><div class="muted">korisničko ime: ${esc(u.uname)}</div></div></div>
-        <p class="muted">Ime, avatar i dužina pišulinca spremaju se u račun, pa ih imaš na svakom uređaju gdje se prijaviš. Prijatelji te dodaju po korisničkom imenu.</p>
+        <div class="acc-head">${avatar({ av: myAv(), name: S.name }, 'lg')}<div><b>${esc(S.name || u.name)}</b><div class="muted">korisničko ime: ${esc(u.uname)}</div></div></div>
+        <p class="muted">Ime, avatar i statistika spremaju se u račun, pa ih imaš na svakom uređaju gdje se prijaviš. Prijatelji te dodaju po korisničkom imenu.</p>
         ${storageNote()}
         ${u.tempPass ? '<p class="warn">Prijavljen/a si s <b>privremenom lozinkom</b> koju ti je dao admin. Promijeni je ispod (stara lozinka = privremena).</p>' : ''}
         <button class="ghost" id="histBtn" style="width:100%">🕘 Povijest partija</button>
@@ -2054,6 +2057,21 @@
       <p class="muted">Bodovi iz svih online kvizova (stalne sobe i sobe s prijateljima) zbrajaju se na računu. Točnih odgovora: ${k.ok} od ${k.n}${k.n ? ` (${Math.round(100 * k.ok / k.n)}%)` : ''}.</p>
       <table class="scores stats"><tr><th>Kategorija</th><th>Točnih</th><th>Bodovi</th></tr>${rows}</table>`;
   }
+  // pregled na vrhu statistike: vrijeme igranja, partije, pobjede, uspješnost, najdraža igra
+  function statSummaryHtml(st) {
+    const x = statSum(st);
+    const sec = k => Object.values(st[k] || {}).reduce((t, y) => t + (y.t || 0), 0);
+    let fav = null, favP = 0;
+    STAT_ROWS.forEach(([k, n]) => { if (k === 'turnir') return; const p = (((st.online || {})[k] || {}).p || 0) + (((st.bots || {})[k] || {}).p || 0); if (p > favP) { favP = p; fav = n; } });
+    const tile = (icon, val, lab) => `<div class="st-tile"><b>${icon} ${val}</b><small>${lab}</small></div>`;
+    return `<div class="st-sum">
+        ${tile('⏱', fmtHours(x.t), 'odigrano')}
+        ${tile('🃏', x.p, 'partija')}
+        ${tile('🏆', x.w, 'pobjeda')}
+        ${tile('📈', x.p ? Math.round(100 * x.w / x.p) + '%' : '–', 'uspješnost')}
+      </div>
+      <p class="muted st-note">${fav ? `Najdraža igra: <b>${esc(fav)}</b> (${favP} partija). ` : ''}Online: ${fmtTime(sec('online'))}, protiv botova: ${fmtTime(sec('bots'))}. Vrijeme igranja broji se od verzije 1.20.0.</p>`;
+  }
   function statsHtml() {
     const st = (acc.user && acc.user.stats) || {};
     const table = (sec, title) => {
@@ -2069,6 +2087,7 @@
     };
     return `<h2>Statistika</h2>
       <p class="muted" style="text-align:center;margin-top:-4px">${esc(acc.user ? acc.user.uname : '')}</p>
+      ${acc.user ? statSummaryHtml(st) : ''}
       ${acc.user ? '<button class="ghost" id="histBtn" style="width:100%;margin-bottom:10px">🕘 Povijest partija (tko je što odigrao)</button>' : ''}
       ${acc.user ? `<div class="wallet-box"><div>Žetoni za poker</div><b>${walletHtml(acc.user.chips)}</b></div>
       <p class="muted">Svaka partija pokera košta ulog od ${fmtChips(P.START_CHIPS)} žetona, a na kraju ti se na račun vrati ono s čim završiš (pobjednik dobije žetone svih igrača za stolom). Ako napustiš partiju prije kraja, gubiš ulog. Tko padne ispod ${fmtChips(1000)} žetona, dobije besplatnu dopunu do ${fmtChips(1000)}${acc.user.refills ? ` (dosad dopunjeno ${acc.user.refills}×)` : ''}.</p>` : ''}
@@ -2130,7 +2149,7 @@
       let btn = '';
       if (f.at.open && f.at.code) btn = `<button class="ghost small" data-sjoin="${esc(f.at.code)}" title="Uđi u njegovu/njezinu sobu">Pridruži se</button>`;
       if (!busy) btn += `<button class="small" data-sinv="${f.id}">Pozovi</button>`;
-      return `<li class="${busy ? 'busy' : ''}">${avatar({ av: f.av, name: f.name, cm: 0 }, 'md', '<span class="pres on"></span>')}
+      return `<li class="${busy ? 'busy' : ''}">${avatar({ av: f.av, name: f.name }, 'md', '<span class="pres on"></span>')}
         <span class="n"><b>${esc(f.name)}</b><span class="sub">${esc(friendWhere(f))}</span></span>
         <span class="sf-btns"><button class="ghost small msg-btn" data-smsg="${f.id}" aria-label="Poruka">💬${f.unread ? `<span class="badge">${f.unread > 9 ? '9+' : f.unread}</span>` : ''}</button>${btn}</span></li>`;
     };
@@ -2164,7 +2183,7 @@
         if (f.unread) sub = f.unread === 1 ? 'Nova poruka' : f.unread + (f.unread < 5 ? ' nove poruke' : ' novih poruka');
         btns += `<button class="ghost small" data-frem="${f.id}" data-fname="${esc(f.name)}" aria-label="Ukloni">✕</button>`;
       }
-      return `<li class="${f.at ? 'online' : ''}${f.unread ? ' unread' : ''}">${avatar({ av: f.av, name: f.name, cm: 0 }, 'md', f.status === 'ok' ? `<span class="pres ${f.at ? 'on' : ''}"></span>` : '')}
+      return `<li class="${f.at ? 'online' : ''}${f.unread ? ' unread' : ''}">${avatar({ av: f.av, name: f.name }, 'md', f.status === 'ok' ? `<span class="pres ${f.at ? 'on' : ''}"></span>` : '')}
         <span class="n"><b>${esc(f.name)}</b> <span class="muted">${esc(f.uname)}</span><span class="sub">${esc(sub)}</span></span>${btns}</li>`;
     };
     return `<h2>Prijatelji</h2>
@@ -2344,7 +2363,7 @@
     else if (modal === 'settings') html = `<h2>Postavke</h2>
       ${room && !room.local && room.game ? '<p class="muted">U online igri bodovi se tijekom ruke ne prikazuju, po pravilima ih brojiš sam/a. Vidi se samo ukupni rezultat.</p>' : ''}
       <label class="chk"><input type="checkbox" id="sp" ${S.showPoints ? 'checked' : ''}> Prikaži bodove tijekom igre (protiv botova)</label>
-      <label class="chk"><input type="checkbox" id="scm" ${S.showCm ? 'checked' : ''}> Prikaži dužinu pišulinca ispod avatara</label>
+      <label class="chk"><input type="checkbox" id="scm" ${S.showSt ? 'checked' : ''}> Prikaži broj pobjeda ispod avatara</label>
       <label class="chk"><input type="checkbox" id="snd" ${S.sound ? 'checked' : ''}> Zvukovi</label>
       <div class="row" style="margin-top:12px"><button class="ghost" id="rulesB">Pravila</button><button id="close">Zatvori</button></div>
       ${verLine()}`;
@@ -2387,7 +2406,7 @@
     if (focus) { const f = el.querySelector('#' + focus); if (f) f.focus(); }
     const c = el.querySelector('#close'); if (c) c.onclick = () => { modal = null; render(); };
     const sp = el.querySelector('#sp'); if (sp) sp.onchange = () => { S.showPoints = sp.checked; save(); render(); };
-    const scm = el.querySelector('#scm'); if (scm) scm.onchange = () => { S.showCm = scm.checked; save(); render(); };
+    const scm = el.querySelector('#scm'); if (scm) scm.onchange = () => { S.showSt = scm.checked; save(); render(); };
     const snd = el.querySelector('#snd'); if (snd) snd.onchange = () => { S.sound = snd.checked; save(); };
     const rb = el.querySelector('#rulesB'); if (rb) rb.onclick = () => { modal = 'rules'; render(); };
     bindNotes(el);

@@ -134,7 +134,7 @@ function clean(s, n) { return String(s || '').replace(/[<>]/g, '').trim().slice(
 // chat: bez kontrolnih znakova, razmaci sažeti, do 200 znakova
 function cleanChat(s, n) { return String(s || '').replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, n || CHAT_LEN); }
 
-// ---------- profil: avatar i "dužina pišulinca" ----------
+// ---------- profil: avatar (+ kratka statistika uz avatar u igri) ----------
 // slike se drže jednom po sadržaju (hash) i šalju klijentu samo prvi put
 const IMGS = new Map(), IMG_KEEP = 600;
 function cleanAv(av) { const m = /^e(\d{1,2})$/.exec(String(av || '')); return m && +m[1] < AV.N ? 'e' + +m[1] : null; }
@@ -152,12 +152,10 @@ function storeImg(d) {
   while (IMGS.size > IMG_KEEP) IMGS.delete(IMGS.keys().next().value);
   return id;
 }
-const cleanCm = v => { v = Math.round(+v); return v >= 1 && v <= 50 ? v : 0; };
 // vraća profil za korisnički račun (ako je igrač prijavljen)
 function setProfile(c, m) {
   const acc = {};
   if ('name' in m) acc.name = c.name = clean(m.name) || c.name || 'Igrač';
-  if ('cm' in m) acc.cm = c.cm = cleanCm(m.cm);
   if ('av' in m) {
     if (m.av === 'img') {
       const d = cleanImg(m.img);
@@ -169,19 +167,21 @@ function setProfile(c, m) {
 // trenutni profil igrača u obliku za račun
 function accProfile(c) {
   const id = c.av && c.av.startsWith('i:') ? c.av.slice(2) : null;
-  return { name: c.name, cm: c.cm || 0, av: id ? (IMGS.has(id) ? 'img' : null) : c.av || null, img: id && IMGS.get(id) || null };
+  return { name: c.name, av: id ? (IMGS.has(id) ? 'img' : null) : c.av || null, img: id && IMGS.get(id) || null };
 }
 // profil iz računa (npr. nakon prijave na drugom uređaju)
 function profileFromUser(c, u) {
-  c.name = u.name || u.uname; c.cm = u.cm || 0;
+  c.name = u.name || u.uname;
   c.av = u.av === 'img' && u.img ? 'i:' + storeImg(u.img) : cleanAv(u.av) || c.av;
 }
+// kratka statistika za prikaz uz avatar: ukupno pobjeda i odigranih sati (samo prijavljeni)
+function statOf(u) { const x = ACC.summary(u); return { w: x.w, p: x.p, t: x.t }; }
 // prikaz mjesta: ljudi uvijek s trenutnim profilom
 function seatAv(s) {
-  if (s.bot) return { av: s.av || AV.forName(s.name), cm: s.cm || 0 };
+  if (s.bot) return { av: s.av || AV.forName(s.name) };
   const c = clients.get(s.token);
   const u = c && c.uid && ACC.user(c.uid);
-  return Object.assign({ av: (c && c.av) || AV.forName(s.name), cm: (c && c.cm) || 0 }, u ? { uname: u.uname } : {});
+  return Object.assign({ av: (c && c.av) || AV.forName(s.name) }, u ? { uname: u.uname, st: statOf(u) } : {});
 }
 
 function createRoom(mode, host, opts) {
@@ -213,8 +213,7 @@ function addBot(r) {
   if (i < 0) return false;
   const used = new Set(r.seats.filter(Boolean).map(s => s.name));
   const name = BOT_NAMES.find(n => !used.has(n)) || 'Bot';
-  // botovi dobiju nasumičnu dužinu pišulinca (1–50 cm), ista dok sjede u sobi
-  r.seats[i] = { bot: true, name, av: AV.forName(name), cm: 1 + Math.floor(Math.random() * 50) };
+  r.seats[i] = { bot: true, name, av: AV.forName(name) };
   return true;
 }
 
@@ -244,7 +243,7 @@ function leaveCurrent(token) {
     chipsLeave(r, i);
     // tijekom igre bot preuzima mjesto
     const p = seatAv(r.seats[i]);
-    r.seats[i] = { bot: true, name: r.seats[i].name + ' (bot)', av: p.av, cm: p.cm };
+    r.seats[i] = { bot: true, name: r.seats[i].name + ' (bot)', av: p.av };
     r.game.players[i].bot = true;
     r.game.players[i].name = r.seats[i].name;
     pushSignal(r, -1, r.seats[i].name.replace(' (bot)', '') + ' je napustio/la igru, bot igra umjesto njega/nje.');
@@ -323,6 +322,7 @@ function startGame(r) {
     if (k !== r.kind) { r.kind = k; r.wins = Array(sideCount(r)).fill(0); }
   }
   const prevDealer = r.game && r.game.kind === r.kind ? r.game.dealer : -1;
+  r.gameAt = Date.now();
   const o = { names: r.seats.map(s => s.name), bots: r.seats.map(s => !!s.bot), dealer: prevDealer + 1, blindEvery: r.tour ? TOUR_BLINDS : undefined };
   if (r.kind === 'poker') r.game = P.newGame(r.mode, o);
   else if (r.kind === 'covjece') r.game = CJ.newGame(r.mode, o);
@@ -357,6 +357,7 @@ function recordStats(r, g) {
   const key = Accounts.statKey(r.kind, r.low);
   // zadnja igra turnira: upiši i cijeli turnir (pobjeda = prvo mjesto)
   const st = r.tour && r.tour.done ? TR.standings(r.tour) : null;
+  const ms = r.gameAt ? Date.now() - r.gameAt : 0; // odigrano vrijeme (sati igranja u statistici)
   if (r.histPlayers) {
     const doc = History.build(r, g, r.histPlayers);
     if (doc) ACC.saveGame(doc, r.uids.slice());
@@ -365,7 +366,7 @@ function recordStats(r, g) {
   r.uids.forEach((uid, i) => {
     const u = uid && ACC.user(uid);
     if (!u) return;
-    ACC.record(u, section, key, res.draw ? 'd' : res.winners.includes(i) ? 'w' : 'l');
+    ACC.record(u, section, key, res.draw ? 'd' : res.winners.includes(i) ? 'w' : 'l', ms);
     if (st) {
       const firsts = st.filter(x => x.place === 1).length;
       ACC.record(u, section, 'turnir', firsts === st.length ? 'd' : st.find(x => x.p === i).place === 1 ? 'w' : 'l');
@@ -575,8 +576,8 @@ function kvTopMsg(c, cat) {
   const me = c && c.uid && ACC.user(c.uid);
   const t = ACC.kvizTop(10, cat, me);
   // gosti ne vide tko je na ljestvici: umjesto imena i avatara "Igrač 1", "Igrač 2"...
-  const row = x => !me ? { uname: '', name: 'Igrač ' + x.rank, av: AV.forName('Igrač ' + x.rank), cm: 0, pts: x.pts, rank: x.rank, me: false }
-    : { uname: x.u.uname, name: x.u.name || x.u.uname, av: x.u.av === 'img' && x.u.img ? 'i:' + storeImg(x.u.img) : x.u.av || AV.forName(x.u.name || x.u.uname), cm: x.u.cm || 0, pts: x.pts, rank: x.rank, me: x.u.id === me.id };
+  const row = x => !me ? { uname: '', name: 'Igrač ' + x.rank, av: AV.forName('Igrač ' + x.rank), pts: x.pts, rank: x.rank, me: false }
+    : { uname: x.u.uname, name: x.u.name || x.u.uname, av: x.u.av === 'img' && x.u.img ? 'i:' + storeImg(x.u.img) : x.u.av || AV.forName(x.u.name || x.u.uname), pts: x.pts, rank: x.rank, me: x.u.id === me.id };
   const top = t.top.map(row);
   return { type: 'kvTop', cat, top, me: t.me ? row(t.me) : null, players: t.players, guest: !me, imgs: newImgs(c, top.map(x => x.av)) };
 }
@@ -738,7 +739,7 @@ function friendsView(u, c) {
     const av = f.av === 'img' && f.img ? 'i:' + storeImg(f.img) : f.av || AV.forName(f.name || f.uname);
     const ok = u.friends[fid] === 'ok';
     const dm = ok ? ACC.dmInfo(u.id, f.id) : null;
-    list.push({ id: f.id, uname: f.uname, name: f.name || f.uname, av, cm: f.cm || 0, status: u.friends[fid], at: ok ? presenceOf(f.id) : null, seen: ok ? f.seen : null, unread: dm ? dm.unread : 0, last: dm ? dm.last : 0 });
+    list.push({ id: f.id, uname: f.uname, name: f.name || f.uname, av, status: u.friends[fid], at: ok ? presenceOf(f.id) : null, seen: ok ? f.seen : null, unread: dm ? dm.unread : 0, last: dm ? dm.last : 0 });
   }
   return { list, imgs: newImgs(c, list.map(f => f.av)) };
 }
@@ -746,7 +747,7 @@ function accountMsg(u, c, withImg) {
   const fv = friendsView(u, c);
   return {
     type: 'account', storage: ACC.kind,
-    user: Object.assign({ id: u.id, uname: u.uname, name: u.name, av: u.av, cm: u.cm, stats: u.stats, chips: ACC.chipsOf(u), refills: u.refills || 0, chipsLast: u.chipsLast || null, lobbyAdmin: isAdmin(u), admin: isAppAdmin(u), tempPass: !!u.tempPass, kviz: ACC.kvizOf(u) }, withImg ? { img: u.img } : {}),
+    user: Object.assign({ id: u.id, uname: u.uname, name: u.name, av: u.av, stats: u.stats, chips: ACC.chipsOf(u), refills: u.refills || 0, chipsLast: u.chipsLast || null, lobbyAdmin: isAdmin(u), admin: isAppAdmin(u), tempPass: !!u.tempPass, kviz: ACC.kvizOf(u) }, withImg ? { img: u.img } : {}),
     friends: fv.list, imgs: fv.imgs,
   };
 }
@@ -821,9 +822,9 @@ const isAppAdmin = u => !!u && ADMINS.has(u.uname.toLowerCase());
 const isAdmin = u => !!u && (LOBBY_ADMINS.has(u.uname.toLowerCase()) || isAppAdmin(u));
 function userCard(uid) {
   const u = ACC.user(uid);
-  if (!u) return { id: uid, name: 'Igrač', uname: '', av: 'e0', cm: 0 };
+  if (!u) return { id: uid, name: 'Igrač', uname: '', av: 'e0' };
   const av = u.av === 'img' && u.img ? 'i:' + storeImg(u.img) : u.av || AV.forName(u.name || u.uname);
-  return { id: u.id, name: u.name || u.uname, uname: u.uname, av, cm: u.cm || 0 };
+  return { id: u.id, name: u.name || u.uname, uname: u.uname, av };
 }
 // tko je online: prijavljeni (po računu) + broj gostiju (po vezi)
 function lobbyWho() {
@@ -1000,7 +1001,8 @@ function accountMessage(m, token, c, ws, ip) {
       if (now - (c.statAt[key] || 0) < STAT_GAP) { if (bank && m.res === 'l') pushAccount(u.id); return; }
       c.statAt[key] = now;
       if (bank && m.res === 'w') ACC.addChips(u, (m.mode - 1) * P.START_CHIPS);
-      ACC.record(u, 'bots', key, m.res);
+      ACC.record(u, 'bots', key, m.res, Math.min(+m.ms || 0, now - (c.botT || now)));
+      c.botT = now; // sljedeća partija se broji od sad
       pushAccount(u.id);
       return;
     }
@@ -1021,7 +1023,7 @@ wss.on('connection', (ws, req) => {
       c.ws = ws; c.name = clean(m.name) || c.name || 'Igrač';
       c.sentImgs = new Set(); // nova veza: slike treba poslati ponovno
       c.lobby = false;        // grupni chat: klijent se ponovno pretplati (lobbyOpen)
-      setProfile(c, { av: m.av, img: m.img, cm: m.cm });
+      setProfile(c, { av: m.av, img: m.img });
       clients.set(token, c);
       send(ws, { type: 'welcome', token });
       const r = c.room && rooms.get(c.room);
@@ -1055,7 +1057,7 @@ wss.on('connection', (ws, req) => {
     }
     switch (m.type) {
       case 'setName': c.name = clean(m.name) || c.name; break;
-      case 'botGame': c.bots = m.off ? null : { kind: kindOf(m), low: lowOf(m), mode: [2, 3, 4].includes(+m.mode) ? +m.mode : 2 }; presenceSoon(); break;
+      case 'botGame': if (!m.off) c.botT = Date.now(); c.bots = m.off ? null : { kind: kindOf(m), low: lowOf(m), mode: [2, 3, 4].includes(+m.mode) ? +m.mode : 2 }; presenceSoon(); break;
       case 'profile': {
         const acc = setProfile(c, m);
         const u = c.uid && ACC.user(c.uid);

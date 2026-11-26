@@ -33,7 +33,7 @@ function client(port, name, auth) {
     const t = setTimeout(() => rej(new Error('timeout: ' + (what || f))), 8000);
     c.waiters.push(m => f(m) ? (clearTimeout(t), c.pos = c.msgs.length, res(m), true) : false);
   });
-  c.open = new Promise(r => ws.on('open', () => { c.send({ type: 'hello', name, av: 'e3', cm: 17, auth }); r(); }));
+  c.open = new Promise(r => ws.on('open', () => { c.send({ type: 'hello', name, av: 'e3', auth }); r(); }));
   return c;
 }
 const uniq = 'u' + Date.now().toString(36).slice(-6);
@@ -54,7 +54,7 @@ const uniq = 'u' + Date.now().toString(36).slice(-6);
   const auth = await a.until(m => m.type === 'auth');
   const accA = await a.until(m => m.type === 'account' && m.user);
   assert.strictEqual(accA.user.name, 'Ana', 'račun preuzme ime iz profila');
-  assert.strictEqual(accA.user.av, 'e3'); assert.strictEqual(accA.user.cm, 17);
+  assert.strictEqual(accA.user.av, 'e3'); assert.strictEqual(accA.user.cm, undefined, 'nema više dužine pišulinca');
   b.send({ type: 'register', uname: 'ana_' + uniq.toUpperCase(), pass: 'tajna123' });
   assert.match((await b.until(m => m.type === 'authError')).msg, /zauzeto/, 'ime je jedinstveno bez obzira na velika slova');
   b.send({ type: 'register', uname: 'bruno_' + uniq, pass: 'lozinka9' });
@@ -65,7 +65,7 @@ const uniq = 'u' + Date.now().toString(36).slice(-6);
   a.send({ type: 'profile', name: 'Ana B', cm: 22, av: 'e5' });
   await new Promise(r => setTimeout(r, 100));
   const ua = server.accounts.byUname('ana_' + uniq);
-  assert.strictEqual(ua.name, 'Ana B'); assert.strictEqual(ua.cm, 22); assert.strictEqual(ua.av, 'e5');
+  assert.strictEqual(ua.name, 'Ana B'); assert.strictEqual(ua.cm, undefined); assert.strictEqual(ua.av, 'e5');
 
   // prijava s "drugog uređaja" preuzme profil iz računa; kriva lozinka ne prolazi
   const a2 = client(port, 'Netko');
@@ -116,6 +116,7 @@ const uniq = 'u' + Date.now().toString(36).slice(-6);
   a.send({ type: 'join', code: lobby.code });
   const full = await b.until(m => m.type === 'room' && m.seats.every(s => s));
   assert(full.seats.every(s => s.uname), 'u sobi se vidi korisničko ime');
+  assert(full.seats.every(s => s.st && s.st.w === 0 && s.st.p === 0), 'uz mjesto ide kratka statistika (pobjede, partije, vrijeme)');
   a.autoplay = b.autoplay = true;
   b.send({ type: 'start' });
   // status "u igri" (partija je ubrzana, pa može završiti prije nego se status pošalje: provjeri na serveru)
@@ -134,6 +135,7 @@ const uniq = 'u' + Date.now().toString(36).slice(-6);
   const ub = server.accounts.byUname('bruno_' + uniq);
   assert.strictEqual(ub.stats.online.briskula.p, 1);
   assert.strictEqual(ub.stats.online.briskula.w + stA.w + ub.stats.online.briskula.d, res.draw ? 2 : 1);
+  assert(stA.t > 0, 'upisano je trajanje partije');
   console.log('statistika online ok:', JSON.stringify(stA));
 
   // partija protiv botova (javlja preglednik); prebrzo ponavljanje se ignorira
@@ -143,6 +145,13 @@ const uniq = 'u' + Date.now().toString(36).slice(-6);
   await new Promise(r => setTimeout(r, 150));
   assert.deepStrictEqual(ua.stats.bots.treseta_meno, { p: 1, w: 1, d: 0 });
   assert(stBot);
+  // trajanje partije protiv botova: najviše koliko je prošlo od početka (botGame), ne koliko klijent kaže
+  a.send({ type: 'botGame', kind: 'briskula', mode: 2 });
+  await new Promise(r => setTimeout(r, 300));
+  a.send({ type: 'stat', kind: 'briskula', res: 'l', ms: 5 * 3600e3 });
+  await new Promise(r => setTimeout(r, 150));
+  const tb = ua.stats.bots.briskula.t;
+  assert(tb >= 250 && tb < 5000, 'vrijeme protiv botova je ograničeno: ' + tb);
   console.log('statistika protiv botova ok');
 
   // žetoni za poker: novi račun ima 5000; partija protiv botova (pobjeda u troje +2000, poraz −1000)

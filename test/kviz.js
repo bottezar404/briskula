@@ -2,6 +2,7 @@
 // botovi, i online partija preko servera (istodobni odgovori, istek vremena).
 'use strict';
 process.env.PORT = 0; process.env.BRK_PACE_SCALE = '0.02';
+process.env.BRK_DATA_FILE = ':memory:'; process.env.DATABASE_URL = '';
 const assert = require('assert');
 const K = require('../public/kviz.js');
 const KB = require('../public/kviz-bot.js');
@@ -149,6 +150,32 @@ const wrong = (q, k) => q.type === 'w' ? 't:krivo' + k : 'a:' + ((q.ans + k) % 4
   console.log('kviz pisanje i stalne sobe ok');
 }
 
+// ---------- kviz bodovi na računu ----------
+{
+  const Accounts = require('../server/accounts.js');
+  const docs = new Map();
+  const st = { docs, ready: Promise.resolve(), isReady: () => true, kind: 'test', flush: async () => {}, get: k => docs.get(k), put: (k, v) => docs.set(k, v), del: k => docs.delete(k) };
+  const A = Accounts.create(st);
+  const u1 = { id: 1, uname: 'ana', name: 'Ana' }, u2 = { id: 2, uname: 'bo', name: 'Bo' }, u3 = { id: 3, uname: 'ci', name: 'Ci' };
+  for (const u of [u1, u2, u3]) docs.set('user:' + u.id, u);
+  assert.deepStrictEqual(A.kvizOf(u1), { pts: 0, ok: 0, n: 0, cats: {} });
+  A.addKviz(u1, 900, 'geo', true); A.addKviz(u1, 0, 'geo', false); A.addKviz(u1, 700.4, 'spo', true);
+  A.addKviz(u2, 1000, 'spo', true);
+  A.addKviz(u3, -50, 'x<y', false); // negativno i neispravna kategorija se ne broje
+  assert.deepStrictEqual(u1.kviz, { pts: 1600, ok: 2, n: 3, cats: { geo: { pts: 900, ok: 1 }, spo: { pts: 700, ok: 1 } } });
+  assert.deepStrictEqual(u3.kviz, { pts: 0, ok: 0, n: 1, cats: {} });
+  let t = A.kvizTop(10, null, u2);
+  assert.deepStrictEqual(t.top.map(x => [x.u.uname, x.pts, x.rank]), [['ana', 1600, 1], ['bo', 1000, 2]]);
+  assert.strictEqual(t.me.rank, 2); assert.strictEqual(t.players, 2);
+  t = A.kvizTop(10, 'spo', u1);
+  assert.deepStrictEqual(t.top.map(x => [x.u.uname, x.pts]), [['bo', 1000], ['ana', 700]]);
+  assert.strictEqual(A.kvizTop(1, null, u2).top.length, 1);
+  assert.strictEqual(A.kvizTop(10, null, u3).me, null, 'bez bodova nema mjesta');
+  A.addKviz(u2, 900, 'spo', true); // ljestvica se osvježi bez ponovnog građenja
+  assert.strictEqual(A.kvizTop(10).top[0].u.uname, 'bo');
+  console.log('kviz bodovi na računu ok');
+}
+
 // ---------- online ----------
 const WebSocket = require('ws');
 const server = require('../server/index.js');
@@ -201,6 +228,10 @@ function client(port, name, auto) {
   // stalne sobe: popis, ulazak, dva igrača odgovaraju, izlazak
   const c = client(port, 'Cvita', false), d = client(port, 'Dino', false);
   await c.open; await d.open;
+  const msgOf = (cl, type, f) => new Promise(res => { const h = x => { const m = JSON.parse(x); if (m.type === type && (!f || f(m))) { cl.ws.off('message', h); res(m); } }; cl.ws.on('message', h); });
+  const reg = msgOf(c, 'account', m => m.user);
+  c.send({ type: 'register', uname: 'cvita_' + Date.now().toString(36), pass: 'tajna123' });
+  assert.deepStrictEqual((await reg).user.kviz, { pts: 0, ok: 0, n: 0, cats: {} });
   const list = new Promise(res => c.ws.on('message', x => { const m = JSON.parse(x); if (m.type === 'kvList') res(m); }));
   c.send({ type: 'kvList' });
   const L = await list;
@@ -215,6 +246,19 @@ function client(port, name, auto) {
   c.send({ type: 'play', card: q.game.q.type === 'w' ? 't:Zagreb' : 'a:0' }); d.send({ type: 'play', card: q.game.q.type === 'w' ? 't:Split' : 'a:1' });
   const r1 = await c.until(m => m.game && m.game.stage === 'reveal');
   assert(r1.game.players.every(p => p.ans), 'oba odgovora');
+  // prijavljena Cvita odmah vidi bodove na računu, gost Dino ih nema
+  const myPts = r1.game.players[0].ans.ok ? r1.game.players[0].ans.pts : 0;
+  assert.strictEqual(r1.seats[0].kvPts, myPts, 'bodovi s pitanja su na računu');
+  assert.strictEqual(r1.seats[1].kvPts, undefined, 'gost ne skuplja');
+  const top = msgOf(c, 'kvTop');
+  c.send({ type: 'kvTop' });
+  const T = await top;
+  assert.strictEqual(T.guest, false);
+  if (myPts) assert(T.me && T.me.pts === myPts && T.top.some(x => x.me));
+  const topCat = msgOf(d, 'kvTop');
+  d.send({ type: 'kvTop', cat: 'hrv' });
+  const T2 = await topCat;
+  assert.strictEqual(T2.cat, 'hrv'); assert.strictEqual(T2.guest, true); assert.strictEqual(T2.me, null);
   c.send({ type: 'chat', text: 'bok' });
   await d.until(m => m.chat && m.chat.some(x => x.text === 'bok' && x.from === 0));
   d.send({ type: 'leave' });
@@ -223,6 +267,21 @@ function client(port, name, auto) {
   c.send({ type: 'leave' });
   await new Promise(r => setTimeout(r, 200));
   assert.strictEqual(server.kvRooms.get('hrv').game.phase, 'idle', 'prazna soba miruje');
+  // nakon izlaska i ulaska u drugu sobu bodovi ostaju i dalje se skupljaju
+  c.send({ type: 'join', code: 'KV-GEO' });
+  const k2 = await c.until(m => m.kvRoom === 'geo');
+  assert.strictEqual(k2.seats[0].kvPts, myPts, 'bodovi ostaju na računu');
+  const q2 = await c.until(m => m.game && m.game.phase === 'play' && m.kvRoom === 'geo');
+  const acc2 = msgOf(c, 'account', m => m.user && m.user.kviz.n >= 2);
+  c.send({ type: 'play', card: q2.game.q.type === 'w' ? 't:Pariz' : 'a:2' });
+  const r2 = await c.until(m => m.game && m.game.stage === 'reveal' && m.kvRoom === 'geo');
+  const pts2 = r2.game.players[0].ans.ok ? r2.game.players[0].ans.pts : 0;
+  assert.strictEqual(r2.seats[0].kvPts, myPts + pts2);
+  c.send({ type: 'leave' });
+  c.send({ type: 'account' });
+  const A2 = await acc2;
+  assert.strictEqual(A2.user.kviz.pts, myPts + pts2); assert.strictEqual(A2.user.kviz.n, 2);
+  assert.strictEqual(A2.user.kviz.cats.geo ? A2.user.kviz.cats.geo.pts : 0, pts2);
   console.log('kviz stalne sobe online ok');
   process.exit(0);
 })().catch(e => { console.error(e); process.exit(1); });

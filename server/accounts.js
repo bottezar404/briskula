@@ -42,6 +42,7 @@ function create(store) {
   const save = u => store.put('user:' + u.id, u);
   const dmKey = (a, b) => 'dm:' + Math.min(a, b) + ':' + Math.max(a, b);
   const norm = s => String(s || '').normalize('NFC').trim();
+  let kvTop = null; // popis korisnika s kviz bodovima (gradi se po potrebi)
 
   function newSession(uid) {
     const token = crypto.randomBytes(24).toString('hex');
@@ -150,6 +151,35 @@ function create(store) {
       const s = sec[key] || (sec[key] = { p: 0, w: 0, d: 0 });
       s.p++; if (res === 'w') s.w++; else if (res === 'd') s.d++;
       save(u);
+    },
+
+    // ---------- kviz bodovi (skupljaju se na računu, iz svih kvizova) ----------
+    kvizOf: u => (u && u.kviz) || { pts: 0, ok: 0, n: 0, cats: {} },
+    /** dodaj bodove za jedno odgovoreno pitanje (pts može biti 0 za netočan odgovor) */
+    addKviz(u, pts, cat, ok) {
+      pts = Math.max(0, Math.round(+pts || 0));
+      if (!u.kviz) { u.kviz = { pts: 0, ok: 0, n: 0, cats: {} }; kvTop = null; }
+      const k = u.kviz;
+      k.pts += pts; k.n++;
+      if (ok) k.ok++;
+      if (cat && /^[a-z]{2,8}$/.test(cat)) {
+        const c = k.cats[cat] || (k.cats[cat] = { pts: 0, ok: 0 });
+        c.pts += pts; if (ok) c.ok++;
+      }
+      save(u);
+      return k.pts;
+    },
+    /** ljestvica: najboljih n po ukupnim bodovima (ili u jednoj kategoriji) + mjesto zadanog korisnika */
+    kvizTop(n, cat, me) {
+      if (!kvTop) {
+        kvTop = [];
+        for (const [k, u] of store.docs) if (k.startsWith('user:') && u.kviz && u.kviz.pts > 0) kvTop.push(u);
+      }
+      const val = u => (cat ? (u.kviz.cats[cat] || {}).pts || 0 : u.kviz.pts);
+      const all = kvTop.filter(u => val(u) > 0).sort((a, b) => val(b) - val(a) || a.id - b.id);
+      const row = (u, i) => ({ u, pts: val(u), rank: i + 1 });
+      const mi = me ? all.findIndex(u => u.id === me.id) : -1;
+      return { top: all.slice(0, n).map(row), me: mi >= 0 ? row(all[mi], mi) : null, players: all.length };
     },
 
     // ---------- žetoni (poker) ----------

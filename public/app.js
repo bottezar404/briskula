@@ -98,6 +98,7 @@
     if (m.storage) acc.storage = m.storage;
     const was = acc.user;
     acc.user = m.user; acc.friends = m.friends || [];
+    if (!was !== !m.user) kvTopAt = 0; // prijava/odjava: ljestvicu treba osvježiti (gost ↔ račun)
     if (dm.with && !acc.friends.some(f => f.id === dm.with && f.status === 'ok')) dm.with = null;
     else if (dm.with && m.user && 'img' in m.user) net.send({ type: 'dmOpen', id: dm.with }); // nova veza: dohvati propušteno
     if (!m.user) {
@@ -339,6 +340,7 @@
         else if (m.type === 'game') { acc.game = m.game; if (modal === 'history') render(); }
         else if (m.type === 'adminReset') { acc.reset = m; if (modal === 'account') render(); }
         else if (m.type === 'kvList') { kvRooms = m.rooms || []; kvListPaint(); }
+        else if (m.type === 'kvTop') { if (m.imgs) Object.assign(imgCache, m.imgs); kvTop = m; kvTopPaint(); }
         else if (m.type === 'dm' || m.type === 'dmMsg' || m.type === 'dmSeen' || m.type === 'dmRead') onDm(m);
         else if (m.type === 'lobby' || m.type === 'lobbyMsg' || m.type === 'lobbyDel' || m.type === 'lobbyWho') onLobby(m);
       };
@@ -817,6 +819,7 @@
         <h2>Online s drugim igračima</h2>
         ${S.kind === 'kviz' ? `<div class="muted" style="margin-bottom:6px">Kviz sobe – uđi kad hoćeš, pitanja se stalno vrte</div>
         <div class="kv-rooms" id="kvList">${kvListHtml()}</div>
+        <div class="kv-top" id="kvTop">${kvTopHtml()}</div>
         <div class="muted" style="margin:12px 0 6px">Ili napravi svoju sobu za prijatelje (2–4 igrača, s botovima):</div>` : ''}
         ${seg('onMode', modeSeg(S.kind), S.onMode)}
         <div class="stack">
@@ -848,7 +851,7 @@
       if (loggedIn() && net) net.send({ type: 'botGame', kind: S.kind, low, mode: +S.botMode }); // prijatelji vide u kojoj si igri
       ctrl = new LocalGame(+S.botMode, S.botLevel, S.name, S.kind, S.target, low);
     };
-    if (!window.BRK_OFFLINE && S.kind === 'kviz') { kvListSub(); kvListPaint(); }
+    if (!window.BRK_OFFLINE && S.kind === 'kviz') { kvListSub(); kvListPaint(); kvTopAsk(); kvTopPaint(); }
     if (!window.BRK_OFFLINE) {
     $app.querySelector('#create').onclick = () => { needName(); ctrl = getNet(); ctrl.send(profileMsg()); ctrl.send({ type: 'create', mode: +S.onMode, level: 'normal', kind: S.kind, low: !!S.naManje, target: S.target, turnTime: S.turnTime }); };
     $app.querySelector('#quick').onclick = () => { needName(); ctrl = getNet(); ctrl.send(profileMsg()); ctrl.send({ type: 'quick', mode: +S.onMode, kind: S.kind, low: !!S.naManje }); };
@@ -1669,7 +1672,7 @@
         <div class="kv-big">🏆</div>
         <div class="kv-rt">${!w.length ? 'Nitko nije bodovao' : w.length > 1 ? 'Neriješeno!' : w[0] === me ? 'Pobijedio/la si!' : esc(g.players[w[0]] ? g.players[w[0]].name : '') + ' pobjeđuje'}</div>
         ${miniList(top, p => res.scores[p] ? res.scores[p].points : 0)}
-        <p class="muted">Novi krug počinje za nekoliko sekundi…</p>
+        <p class="muted">${r.seats[me] && r.seats[me].kvPts != null ? `Na računu imaš ukupno <b>${kvPts(r.seats[me].kvPts)}</b> bodova. ` : 'Prijavi se i bodovi će ti se skupljati na računu. '}Novi krug počinje za nekoliko sekundi…</p>
       </div>`;
     } else if (intro) {
       const fin = g.round === g.rounds.length - 1;
@@ -1712,11 +1715,13 @@
     }
     let tally = '';
     if (r.wins && r.wins.some(x => x)) tally = ` · pobjede ${r.wins[me] || 0}`;
+    // skupljeni bodovi na računu (stalne sobe; gost nema)
+    const myTot = r.kvRoom && r.seats[me] && r.seats[me].kvPts != null ? r.seats[me].kvPts : null;
     const sigs = g.phase === 'over' ? '' : `<div class="signals">${['👍', '😂', '😮', '🤓', '😤', '🙈'].map(t => `<button class="ghost" data-sig="${t}">${t}</button>`).join('')}</div>`;
     $app.innerHTML = `
       <div class="topbar">
         <button class="ghost small" id="leave">←</button>
-        <div class="mid">${r.kvRoom ? `${esc(r.roomIcon || '')} ${esc(r.roomName || 'Kviz')} · 👥 ${g.mode}` : `Kviz · ${modeName('kviz', g.mode, true)}${r.code ? ' · ' + esc(r.code) : ' · ' + LEVEL_NAMES[r.level]}${tally}`}</div>
+        <div class="mid">${r.kvRoom ? `${esc(r.roomIcon || '')} ${esc(r.roomName || 'Kviz')} · 👥 ${g.mode}${myTot != null ? ` · <span class="kv-tot" title="Tvoji skupljeni bodovi na računu">⭐ ${kvPts(myTot)}</span>` : ''}` : `Kviz · ${modeName('kviz', g.mode, true)}${r.code ? ' · ' + esc(r.code) : ' · ' + LEVEL_NAMES[r.level]}${tally}`}</div>
         ${chatBtn()}
         <button class="ghost small" id="menuBtn">⚙</button>
       </div>
@@ -1783,6 +1788,31 @@
       if (!S.name) { S.name = 'Igrač' + Math.floor(Math.random() * 900 + 100); save(); }
       ctrl = getNet(); ctrl.send(profileMsg()); ctrl.send({ type: 'join', code: b.dataset.kvroom });
     });
+  }
+  // ljestvica skupljenih kviz bodova (svi kvizovi online, ukupno ili po kategoriji)
+  let kvTop = null, kvTopCat = '', kvTopAt = 0;
+  function kvTopAsk(force) {
+    if (!force && kvTop && (kvTop.cat || '') === kvTopCat && Date.now() - kvTopAt < 20000) return;
+    kvTopAt = Date.now();
+    getNet().send({ type: 'kvTop', cat: kvTopCat || null });
+  }
+  function kvTopHtml() {
+    const cats = [['', 'Ukupno']].concat(KV.CATS.map(c => [c.id, c.icon]));
+    const tabs = `<div class="kv-tabs">${cats.map(([id, t]) => `<button class="${id === kvTopCat ? 'on' : ''}" data-kvtop="${id}" title="${id ? esc(KV.catOf(id).name) : 'Svi kvizovi'}">${t}</button>`).join('')}</div>`;
+    const t = kvTop && (kvTop.cat || '') === kvTopCat ? kvTop : null;
+    const row = x => `<li class="${x.me ? 'mine' : ''}"><span class="kv-tr">${['🥇', '🥈', '🥉'][x.rank - 1] || x.rank + '.'}</span>${avatar({ av: x.av, name: x.name }, 'xs')}<span class="kv-tn">${esc(x.name)}</span><b>${kvPts(x.pts)}</b></li>`;
+    let body = '<p class="muted">Učitavanje…</p>';
+    if (t) {
+      body = t.top.length ? `<ol class="kv-board">${t.top.map(row).join('')}${t.me && t.me.rank > t.top.length ? `<li class="gap">…</li>${row(t.me)}` : ''}</ol>` : '<p class="muted">Još nitko nema bodova. Budi prvi/a!</p>';
+      body += `<p class="muted kv-tnote">${t.guest ? 'Prijavi se da ti se bodovi iz kvizova skupljaju na računu.' : acc.user && acc.user.kviz ? `Tvoji bodovi: <b>${kvPts(kvTopCat ? ((acc.user.kviz.cats || {})[kvTopCat] || {}).pts : acc.user.kviz.pts)}</b> · ulazi i izlazi iz soba, bodovi ostaju.` : ''}</p>`;
+    }
+    return `<div class="kv-th">🏆 Ljestvica bodova${kvTopCat ? ' · ' + esc(KV.catOf(kvTopCat).name) : ''}</div>${tabs}${body}`;
+  }
+  function kvTopPaint() {
+    const el = document.getElementById('kvTop');
+    if (!el) return;
+    el.innerHTML = kvTopHtml();
+    el.querySelectorAll('[data-kvtop]').forEach(b => b.onclick = () => { kvTopCat = b.dataset.kvtop; kvTopPaint(); kvTopAsk(true); });
   }
   // tipkovnica: 1–4 ili A–D
   document.addEventListener('keydown', e => {
@@ -1989,6 +2019,13 @@
       ${storageNote()}
       <button class="ghost" id="close" style="width:100%">Zatvori</button>`;
   }
+  function kvizStatsHtml(k) {
+    k = k || { pts: 0, ok: 0, n: 0, cats: {} };
+    const rows = KV.CATS.map(c => { const x = (k.cats || {})[c.id] || { pts: 0, ok: 0 }; return `<tr class="${x.pts || x.ok ? '' : 'zero'}"><td>${c.icon} ${esc(c.name)}</td><td>${x.ok}</td><td>${kvPts(x.pts)}</td></tr>`; }).join('');
+    return `<div class="wallet-box"><div>Kviz bodovi (skupljeno)</div><b>⭐ ${kvPts(k.pts)}</b></div>
+      <p class="muted">Bodovi iz svih online kvizova (stalne sobe i sobe s prijateljima) zbrajaju se na računu. Točnih odgovora: ${k.ok} od ${k.n}${k.n ? ` (${Math.round(100 * k.ok / k.n)}%)` : ''}.</p>
+      <table class="scores stats"><tr><th>Kategorija</th><th>Točnih</th><th>Bodovi</th></tr>${rows}</table>`;
+  }
   function statsHtml() {
     const st = (acc.user && acc.user.stats) || {};
     const table = (sec, title) => {
@@ -2007,6 +2044,7 @@
       ${acc.user ? '<button class="ghost" id="histBtn" style="width:100%;margin-bottom:10px">🕘 Povijest partija (tko je što odigrao)</button>' : ''}
       ${acc.user ? `<div class="wallet-box"><div>Žetoni za poker</div><b>${walletHtml(acc.user.chips)}</b></div>
       <p class="muted">Svaka partija pokera košta ulog od ${fmtChips(P.START_CHIPS)} žetona, a na kraju ti se na račun vrati ono s čim završiš (pobjednik dobije žetone svih igrača za stolom). Ako napustiš partiju prije kraja, gubiš ulog. Tko padne ispod ${fmtChips(1000)} žetona, dobije besplatnu dopunu do ${fmtChips(1000)}${acc.user.refills ? ` (dosad dopunjeno ${acc.user.refills}×)` : ''}.</p>` : ''}
+      ${acc.user ? kvizStatsHtml(acc.user.kviz) : ''}
       ${table('online', 'Online (s drugim igračima)')}
       ${table('bots', 'Protiv botova')}
       <p class="muted">Turnir se broji kao jedna partija (pobjeda = prvo mjesto), a njegove igre se broje i pod briškulom, trešetom i pokerom. Tko napusti online partiju prije kraja, upiše mu se poraz.</p>

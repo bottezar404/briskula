@@ -52,6 +52,7 @@ const rooms = new Map();   // code -> room
 
 const BOT_NAMES = ['Bot Jure', 'Bot Mare', 'Bot Ante', 'Bot Frane', 'Bot Luce', 'Bot Šime', 'Bot Bepo', 'Bot Tonka'];
 const CHAT_LEN = 200, CHAT_KEEP = 50, CHAT_GAP = 700;
+const DM_LEN = 500, DM_GAP = 500;
 // vrijeme za potez (sekunde, 0 = bez ograničenja); kad istekne, partija je gotova
 const TURN_TIMES = [0, 15, 30, 60], TURN_DEFAULT = 30, TURN_GRACE = 1500;
 const TURN_SCALE = +process.env.BRK_TURN_SCALE || 1; // samo za testove
@@ -76,7 +77,7 @@ function code() {
 function send(ws, msg) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(msg)); }
 function clean(s, n) { return String(s || '').replace(/[<>]/g, '').trim().slice(0, n || 20); }
 // chat: bez kontrolnih znakova, razmaci sažeti, do 200 znakova
-function cleanChat(s) { return String(s || '').replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, CHAT_LEN); }
+function cleanChat(s, n) { return String(s || '').replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, n || CHAT_LEN); }
 
 // ---------- profil: avatar i "dužina pišulinca" ----------
 // slike se drže jednom po sadržaju (hash) i šalju klijentu samo prvi put
@@ -433,7 +434,9 @@ function friendsView(u, c) {
     const f = ACC.user(+fid);
     if (!f) continue;
     const av = f.av === 'img' && f.img ? 'i:' + storeImg(f.img) : f.av || AV.forName(f.name || f.uname);
-    list.push({ id: f.id, uname: f.uname, name: f.name || f.uname, av, cm: f.cm || 0, status: u.friends[fid], at: u.friends[fid] === 'ok' ? presenceOf(f.id) : null, seen: u.friends[fid] === 'ok' ? f.seen : null });
+    const ok = u.friends[fid] === 'ok';
+    const dm = ok ? ACC.dmInfo(u.id, f.id) : null;
+    list.push({ id: f.id, uname: f.uname, name: f.name || f.uname, av, cm: f.cm || 0, status: u.friends[fid], at: ok ? presenceOf(f.id) : null, seen: ok ? f.seen : null, unread: dm ? dm.unread : 0, last: dm ? dm.last : 0 });
   }
   return { list, imgs: newImgs(c, list.map(f => f.av)) };
 }
@@ -469,6 +472,40 @@ function presenceTick() {
   }
   for (const uid of notify) pushAccount(uid);
 }
+// direktne poruke: šalju se svim otvorenim vezama korisnika
+function toUser(uid, msg) { for (const t of tokensOf(uid)) { const c = clients.get(t); if (c && c.ws) send(c.ws, msg); } }
+function dmMessage(m, c, ws, u) {
+  const err = msg => send(ws, { type: 'error', msg });
+  if (!u) return err('Prijavi se da šalješ poruke.');
+  const fid = +m.id;
+  switch (m.type) {
+    case 'dmOpen': {
+      const d = ACC.dmGet(u, fid);
+      if (!d) return err('Poruke možeš slati samo prijateljima.');
+      send(ws, { type: 'dm', with: fid, msgs: d.m, seen: d.r[fid] || 0 });
+      if (ACC.dmRead(u, fid)) { toUser(fid, { type: 'dmSeen', with: u.id, seen: d.seq }); toUser(u.id, { type: 'dmRead', with: fid }); }
+      return;
+    }
+    case 'dmRead': {
+      const seq = ACC.dmRead(u, fid);
+      if (seq) { toUser(fid, { type: 'dmSeen', with: u.id, seen: seq }); toUser(u.id, { type: 'dmRead', with: fid }); }
+      return;
+    }
+    case 'dmSend': {
+      const now = Date.now();
+      if (now - (c.lastDm || 0) < DM_GAP) return err('Polako, malo pričekaj.');
+      const text = cleanChat(m.text, DM_LEN);
+      if (!text) return;
+      const res = ACC.dmSend(u, fid, text);
+      if (res.error) return err(res.error);
+      c.lastDm = now;
+      toUser(u.id, { type: 'dmMsg', with: fid, msg: res.msg, nonce: m.nonce });
+      toUser(fid, { type: 'dmMsg', with: u.id, msg: res.msg, from: u.name || u.uname, uname: u.uname });
+      return;
+    }
+  }
+}
+const DM_MSGS = new Set(['dmOpen', 'dmRead', 'dmSend']);
 const ipOf = req => String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket.remoteAddress || '';
 const STAT_GAP = 8000; // partija protiv botova ne može trajati kraće
 
@@ -476,6 +513,7 @@ function accountMessage(m, token, c, ws, ip) {
   const err = msg => send(ws, { type: 'error', msg });
   const authErr = msg => send(ws, { type: 'authError', msg });
   const u = c.uid ? ACC.user(c.uid) : null;
+  if (DM_MSGS.has(m.type)) return dmMessage(m, c, ws, u);
   switch (m.type) {
     case 'register': case 'login': {
       const res = m.type === 'register'
@@ -542,7 +580,7 @@ function accountMessage(m, token, c, ws, ip) {
     }
   }
 }
-const ACCOUNT_MSGS = new Set(['register', 'login', 'logout', 'account', 'password', 'friendAdd', 'friendAccept', 'friendRemove', 'invite', 'stat']);
+const ACCOUNT_MSGS = new Set(['register', 'login', 'logout', 'account', 'password', 'friendAdd', 'friendAccept', 'friendRemove', 'invite', 'stat', ...DM_MSGS]);
 
 wss.on('connection', (ws, req) => {
   let token = null;

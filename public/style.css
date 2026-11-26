@@ -574,3 +574,18 @@ details.pw summary { cursor: pointer; padding: 6px 0; color: var(--gold); font-w
 .invite > div { flex: 1; font-size: 14px; line-height: 1.35; }
 .invite .muted { font-size: 12px; }
 .invite button { flex: 0 0 auto; }
+
+/* ---------- direktne poruke među prijateljima ---------- */
+.chat.dm .chat-head { gap: 10px; }
+.chat.dm .chat-head .av { --s: 34px; }
+.dm-who { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.2; }
+.dm-who b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dm-who .muted { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chat.dm .msg .seen { font-size: 11px; opacity: .6; text-align: right; margin: 2px 4px 0 0; }
+.friends li .msg-btn, #inviteF { position: relative; }
+#inviteF .badge { position: absolute; top: -6px; right: -4px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--red); color: #fff; font-size: 11px; font-weight: 800; line-height: 18px; text-align: center; }
+.friends li.unread { background: rgba(229,199,122,.12); }
+.friends li.unread .sub { color: var(--gold); opacity: 1; font-weight: 700; }
+@media (max-width: 899px), (max-height: 519px) {
+  .chat.dm { height: min(78vh, 600px); height: min(78dvh, 600px); }
+}

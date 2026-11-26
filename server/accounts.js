@@ -2,12 +2,14 @@
  * Zapisi u pohrani (store.js):
  *   user:<id>   { id, uname, name, pass, av, img, cm, stats, friends: { <id>: 'ok'|'out'|'in' }, created, seen }
  *   sess:<hash> { uid, t }   (hash = sha256 tokena; sam token zna samo preglednik)
+ *   dm:<a>:<b>  { seq, m: [{ id, f, t, at }], r: { <uid>: id zadnje pročitane } }   (a < b; direktne poruke među prijateljima)
  */
 'use strict';
 const crypto = require('crypto');
 
 const UNAME_RE = /^[\p{L}\p{N}_.-]{3,20}$/u;
 const PASS_MIN = 6, PASS_MAX = 100, FRIENDS_MAX = 200;
+const DM_KEEP = 200; // koliko zadnjih poruka po razgovoru se čuva
 // vrste igara u statistici
 const STAT_KEYS = ['briskula', 'briskula_meno', 'treseta', 'treseta_meno', 'poker', 'turnir'];
 const statKey = (kind, low) => kind === 'poker' || kind === 'turnir' ? kind : (kind === 'treseta' ? 'treseta' : 'briskula') + (low ? '_meno' : '');
@@ -32,6 +34,7 @@ function create(store) {
   });
   const user = id => store.get('user:' + id) || null;
   const save = u => store.put('user:' + u.id, u);
+  const dmKey = (a, b) => 'dm:' + Math.min(a, b) + ':' + Math.max(a, b);
   const norm = s => String(s || '').normalize('NFC').trim();
 
   function newSession(uid) {
@@ -134,7 +137,46 @@ function create(store) {
       if (!(fid in u.friends)) return {};
       delete u.friends[fid]; save(u);
       if (f && f.friends[u.id]) { delete f.friends[u.id]; save(f); }
+      store.del(dmKey(u.id, fid)); // razgovor nestaje s prijateljstvom
       return { friend: f };
+    },
+
+    // ---------- direktne poruke (samo među prihvaćenim prijateljima) ----------
+    dmKey,
+    /** cijeli razgovor s prijateljem (ili null ako niste prijatelji) */
+    dmGet(u, fid) {
+      if (u.friends[fid] !== 'ok') return null;
+      return store.get(dmKey(u.id, fid)) || { seq: 0, m: [], r: {} };
+    },
+    /** pošalji poruku; vraća { msg } ili { error } */
+    dmSend(u, fid, text) {
+      const f = user(fid);
+      if (!f || u.friends[fid] !== 'ok' || f.friends[u.id] !== 'ok') return { error: 'Poruke možeš slati samo prijateljima.' };
+      if (!text) return { error: 'Prazna poruka.' };
+      const k = dmKey(u.id, fid);
+      const d = store.get(k) || { seq: 0, m: [], r: {} };
+      const msg = { id: ++d.seq, f: u.id, t: text, at: Date.now() };
+      d.m.push(msg);
+      if (d.m.length > DM_KEEP) d.m.splice(0, d.m.length - DM_KEEP);
+      d.r[u.id] = msg.id; // svoje poruke su pročitane
+      store.put(k, d);
+      return { msg, friend: f };
+    },
+    /** označi razgovor pročitanim; vraća id zadnje pročitane poruke ili 0 ako se ništa nije promijenilo */
+    dmRead(u, fid) {
+      const k = dmKey(u.id, fid), d = store.get(k);
+      if (!d || u.friends[fid] !== 'ok' || (d.r[u.id] || 0) >= d.seq) return 0;
+      d.r[u.id] = d.seq; store.put(k, d);
+      return d.seq;
+    },
+    /** broj nepročitanih poruka od prijatelja i vrijeme zadnje poruke */
+    dmInfo(uid, fid) {
+      const d = store.get(dmKey(uid, fid));
+      if (!d || !d.m.length) return { unread: 0, last: 0 };
+      const r = d.r[uid] || 0;
+      let n = 0;
+      for (let i = d.m.length - 1; i >= 0 && d.m[i].id > r; i--) if (d.m[i].f !== uid) n++;
+      return { unread: n, last: d.m[d.m.length - 1].at };
     },
   };
   return api;

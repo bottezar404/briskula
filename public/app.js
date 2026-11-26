@@ -5,7 +5,7 @@
   const T = window.TresetaEngine, TB = window.TresetaBot, AV = window.Avatars;
   const P = window.PokerEngine, PB = window.PokerBot, TR = window.Turnir;
   const CJ = window.CovjeceEngine, CB = window.CovjeceBot;
-  const KV = window.KvizEngine, KVB = window.KvizBot;
+  const KV = window.KvizEngine, KVB = window.KvizBot, KVS = window.KvizSlike;
   const engOf = k => k === 'treseta' ? T : k === 'poker' ? P : k === 'covjece' ? CJ : k === 'kviz' ? KV : E;
   const botOf = k => k === 'treseta' ? TB : k === 'poker' ? PB : k === 'covjece' ? CB : k === 'kviz' ? KVB : B;
   // u pokeru, Čovječe i kvizu svatko igra za sebe (i u četvero); "Chi fa meno" postoji samo za briškulu i trešetu
@@ -1606,6 +1606,7 @@
 
   // ---------- kviz Znalac ----------
   const KV_LET = ['A', 'B', 'C', 'D'];
+  const kvLabel = o => (KVS ? KVS.label(o) : String(o)); // slika kao odgovor -> njezin naziv
   const kvSec = ms => (ms / 1000).toFixed(1).replace('.', ',') + ' s';
   const kvCat = id => id === 'mix' ? { name: 'Finale', icon: '🏆' } : KV.catOf(id);
   const kvPts = n => Math.round(+n || 0).toLocaleString('hr-HR');
@@ -1717,7 +1718,7 @@
         let cls = '';
         if (rev) cls = i === g.q.ans ? 'right' : mine && mine.c === i ? 'wrong' : 'dim';
         else if (mine && mine.c === i) cls = 'picked';
-        return `<button class="kv-opt ${cls}" data-ans="${i}" ${canAns ? '' : 'tabindex="-1"'}><span class="kv-let">${KV_LET[i]}</span><span class="kv-ot">${esc(o)}</span>${rev ? `<span class="kv-who">${kvPickers(r, g, i)}</span>` : ''}</button>`;
+        return `<button class="kv-opt ${cls}" data-ans="${i}" ${canAns ? '' : 'tabindex="-1"'}><span class="kv-let">${KV_LET[i]}</span>${KVS && KVS.isImg(o) ? `<span class="kv-pic" role="img" aria-label="${rev ? esc(KVS.label(o)) : 'Slika ' + KV_LET[i]}">${KVS.svg(o.slice(1))}</span>${rev ? `<span class="kv-ot kv-pn">${esc(KVS.label(o))}</span>` : ''}` : `<span class="kv-ot">${esc(o)}</span>`}${rev ? `<span class="kv-who">${kvPickers(r, g, i)}</span>` : ''}</button>`;
       }).join('');
       // pitanje na pisanje: polje za upis, a nakon pitanja točan odgovor i što je tko napisao
       let wHtml = '';
@@ -1734,7 +1735,7 @@
       }
       card = `<div class="kv-card ${rev ? 'rev' : ''}">${head}${timer}
         <div class="kv-q">${esc(g.q.text)}</div>
-        ${isW ? wHtml : `<div class="kv-opts ${canAns ? 'can' : ''}">${opts}</div>`}
+        ${isW ? wHtml : `<div class="kv-opts ${canAns ? 'can' : ''} ${KVS && g.q.opts.some(KVS.isImg) ? 'pics' : ''}">${opts}</div>`}
         <div class="kv-status">${sysMsg ? esc(sysMsg.text) : status}</div>
       </div>`;
     }
@@ -2253,10 +2254,10 @@
     } else if (g.kind === 'kviz') {
       (g.qs || []).forEach((q, qi) => {
         const ans = g.moves.filter(x => x.q === qi);
-        const right = q.opts ? q.opts[q.ans] : q.answer;
+        const right = q.opts ? kvLabel(q.opts[q.ans]) : q.answer;
         body += `<div class="lh">${qi + 1}. ${esc(q.text)}</div><div class="ll muted">Točno: ${esc(right == null ? '?' : right)}</div>`;
         for (const a of ans) {
-          const m = String(a.m), txt = m.startsWith('t:') ? m.slice(2) : q.opts ? q.opts[+m.split(':')[1]] : '?';
+          const m = String(a.m), txt = m.startsWith('t:') ? m.slice(2) : q.opts ? kvLabel(q.opts[+m.split(':')[1]]) : '?';
           const ok = 'ok' in a ? a.ok : +m.split(':')[1] === q.ans;
           body += `<div class="ll">${nm(a.p)}: ${esc(txt == null ? '?' : txt)} ${ok ? '✅' : '❌'}</div>`;
         }

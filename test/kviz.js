@@ -22,6 +22,20 @@ const KP = require('../public/kviz-pitanja.js');
     assert(KP.ALL.filter(q => q.cat === c.id && q.type !== 'w').length >= 40, 'dosta pitanja u kategoriji ' + c.name);
     assert(KP.ALL.filter(q => q.cat === c.id && q.type === 'w').length >= 12, 'dosta pitanja na pisanje: ' + c.name);
   }
+  { // pitanja sa slikama: svaka slika postoji, sve ili nijedna opcija je slika, svaka slika ima ime
+    const KS = require('../public/kviz-slike.js');
+    let n = 0;
+    for (const q of KP.ALL) {
+      if (q.type === 'w') { assert(!String(q.answer).startsWith('#'), 'slika u pitanju na pisanje: ' + q.text); continue; }
+      const im = q.opts.filter(o => /^#[a-z]/.test(o));
+      if (!im.length) continue;
+      n++;
+      assert.strictEqual(im.length, 4, 'sve četiri opcije su slike: ' + q.text);
+      for (const o of im) { assert(KS.isImg(o), 'nema slike ' + o + ': ' + q.text); assert(/^<svg viewBox/.test(KS.svg(o.slice(1)))); assert(KS.label(o) && KS.label(o) !== o, 'ime slike ' + o); }
+    }
+    assert(n >= 60, 'barem 60 pitanja sa slikama, ima ' + n);
+    for (const id of Object.keys(KS.ALL)) assert(!/<script|on\w+=|href=/i.test(KS.svg(id)), 'čist SVG: ' + id);
+  }
   const texts = new Set(); for (const q of KP.ALL) { assert(!texts.has(q.text), 'isto pitanje dvaput: ' + q.text); texts.add(q.text); }
 }
 { // bodovi: 1000 odmah, 500 na kraju, finale dvostruko

@@ -4,6 +4,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const zlib = require('zlib');
 const { WebSocketServer } = require('ws');
 const E = require('../public/engine.js');
 const B = require('../public/bot.js');
@@ -66,6 +67,8 @@ function securityHeaders(req, res) {
   res.setHeader('Content-Security-Policy', CSP_BASE.concat(conn).join('; '));
 }
 
+const GZIP_EXT = new Set(['.js', '.css', '.html', '.json', '.svg', '.webmanifest']);
+const gzCache = new Map(); // datoteka -> sažeti sadržaj
 const server = http.createServer((req, res) => {
   securityHeaders(req, res);
   let p;
@@ -79,7 +82,19 @@ const server = http.createServer((req, res) => {
       return fs.readFile(path.join(PUB, 'index.html'), (e2, d2) => { res.writeHead(e2 ? 404 : 200, { 'Content-Type': TYPES['.html'] }); res.end(d2); });
     }
     const ext = path.extname(file);
-    res.writeHead(200, { 'Content-Type': TYPES[ext] || 'application/octet-stream', 'Cache-Control': p === '/sw.js' ? 'no-cache' : 'public, max-age=300' });
+    const head = { 'Content-Type': TYPES[ext] || 'application/octet-stream', 'Cache-Control': p === '/sw.js' ? 'no-cache' : 'public, max-age=300' };
+    // tekstualne datoteke (npr. velik popis kviz pitanja) šalju se sažete ako preglednik to podržava
+    if (GZIP_EXT.has(ext) && data.length > 1024) {
+      head.Vary = 'Accept-Encoding';
+      if (/\bgzip\b/.test(String(req.headers['accept-encoding'] || ''))) {
+        let z = gzCache.get(file);
+        if (!z || z.len !== data.length || !z.src.equals(data)) { z = { len: data.length, src: data, gz: zlib.gzipSync(data) }; gzCache.set(file, z); }
+        head['Content-Encoding'] = 'gzip';
+        res.writeHead(200, head);
+        return res.end(z.gz);
+      }
+    }
+    res.writeHead(200, head);
     res.end(data);
   });
 });
@@ -313,7 +328,7 @@ function startGame(r) {
   else if (r.kind === 'covjece') r.game = CJ.newGame(r.mode, o);
   else if (r.kind === 'kviz') {
     r.game = KV.newGame(r.mode, Object.assign(o, { exclude: r.kvUsed, qTime: KV.QTIME * PACE_SCALE }));
-    r.kvUsed = r.kvUsed.concat(r.game.qs.map(q => q.id)).slice(-150);
+    r.kvUsed = r.kvUsed.concat(r.game.qs.map(q => q.id)).slice(-800);
     kvStop(r);
   }
   else r.game = r.kind === 'treseta' ? T.newGame(r.mode, Object.assign(o, { target: r.target, low: r.low })) : E.newGame(r.mode, Object.assign(o, { low: r.low }));

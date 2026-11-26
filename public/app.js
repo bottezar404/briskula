@@ -229,7 +229,7 @@
       // kviz: pitanja iz zadnjih partija se ne ponavljaju odmah (pamti se u pregledniku)
       const kvUsed = this.kind === 'kviz' ? store.get('kvUsed', []) : undefined;
       this.st = this.E.newGame(this.mode, { names: this.names, bots: this.names.map((_, i) => i > 0), dealer: this.dealer, low: this.low, target: this.target, blindEvery: this.tour ? TOUR_BLINDS : undefined, exclude: kvUsed });
-      if (this.kind === 'kviz') store.set('kvUsed', kvUsed.concat(this.st.qs.map(q => q.id)).slice(-200));
+      if (this.kind === 'kviz') store.set('kvUsed', kvUsed.concat(this.st.qs.map(q => q.id)).slice(-800));
       this.counted = false;
       this.signals = [];
       this.emit(); this.schedule();

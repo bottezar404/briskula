@@ -757,7 +757,7 @@ function friendsView(u, c) {
     const av = f.av === 'img' && f.img ? 'i:' + storeImg(f.img) : f.av || AV.forName(f.name || f.uname);
     const ok = u.friends[fid] === 'ok';
     const dm = ok ? ACC.dmInfo(u.id, f.id) : null;
-    list.push({ id: f.id, uname: f.uname, name: f.name || f.uname, av, cos: ACC.cosOf(f), status: u.friends[fid], at: ok ? presenceOf(f.id) : null, seen: ok ? f.seen : null, unread: dm ? dm.unread : 0, last: dm ? dm.last : 0 });
+    list.push({ id: f.id, uname: f.uname, name: f.name || f.uname, av, cos: ACC.cosOf(f), st: statOf(f), status: u.friends[fid], at: ok ? presenceOf(f.id) : null, seen: ok ? f.seen : null, unread: dm ? dm.unread : 0, last: dm ? dm.last : 0 });
   }
   return { list, imgs: newImgs(c, list.map(f => f.av)) };
 }
@@ -1052,6 +1052,16 @@ function accountMessage(m, token, c, ws, ip) {
       send(ws, { type: 'history', uname: who.uname, mine: who === u, list: ACC.history(who) });
       return;
     }
+    case 'userInfo': {
+      // profil drugog igrača (statistika): samo za prijavljene, po id-u ili korisničkom imenu
+      if (!u) return err('Prijavi se da vidiš profile igrača.');
+      const who = m.id != null ? ACC.user(+m.id) : ACC.byUname(String(m.uname || ''));
+      if (!who) return err('Nema tog igrača.');
+      const card = userCard(who.id);
+      const fs = u.friends[who.id];
+      send(ws, { type: 'userInfo', user: Object.assign(card, { created: who.created || null, stats: who.stats, st: statOf(who), kviz: ACC.kvizOf(who).pts, me: who.id === u.id, friend: fs || null, at: fs === 'ok' ? presenceOf(who.id) : null }), imgs: newImgs(c, [card.av]) });
+      return;
+    }
     case 'game': {
       if (!u) return;
       const d = ACC.game(m.id);
@@ -1122,7 +1132,7 @@ function accountMessage(m, token, c, ws, ip) {
     }
   }
 }
-const ACCOUNT_MSGS = new Set(['register', 'login', 'logout', 'account', 'password', 'friendAdd', 'friendAccept', 'friendRemove', 'invite', 'stat', 'adminReset', 'history', 'game', 'shopBuy', 'shopEquip', ...DM_MSGS, ...SUG_MSGS]);
+const ACCOUNT_MSGS = new Set(['register', 'login', 'logout', 'account', 'password', 'friendAdd', 'friendAccept', 'friendRemove', 'invite', 'stat', 'adminReset', 'history', 'game', 'userInfo', 'shopBuy', 'shopEquip', ...DM_MSGS, ...SUG_MSGS]);
 
 wss.on('connection', (ws, req) => {
   let token = null;

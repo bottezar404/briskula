@@ -366,6 +366,7 @@
         else if (m.type === 'invite') showInvite(m);
         else if (m.type === 'history') { acc.hist = m; acc.game = null; if (modal === 'history') render(); }
         else if (m.type === 'game') { acc.game = m.game; if (modal === 'history') render(); }
+        else if (m.type === 'userInfo') { if (m.imgs) Object.assign(imgCache, m.imgs); acc.prof = m.user; if (modal === 'profile') render(); }
         else if (m.type === 'adminReset') { acc.reset = m; if (modal === 'account') render(); }
         else if (m.type === 'sugList') { sug.list = m.list; if (acc.user) acc.user.sugN = m.list.filter(x => !x.done).length; if (modal === 'sug' || !room) render(); }
         else if (m.type === 'sugOk') { sug.sent = true; sug.busy = false; sug.draft = ''; if (modal === 'sug') render(); toast('Hvala na prijedlogu!'); }
@@ -667,6 +668,7 @@
     const on = lobby.who.includes(u.id);
     let btns = '';
     if (me) btns = '<span class="muted">To si ti.</span>';
+    if (loggedIn()) btns = `<button class="ghost small" data-prof="${esc(u.uname)}">👤 Profil</button>` + btns;
     else if (!f) btns = `<button class="small" data-lc="add">+ Dodaj za prijatelja</button>`;
     else if (f.status === 'out') btns = '<span class="muted">Zahtjev za prijateljstvo je poslan.</span>';
     else if (f.status === 'in') btns = `<button class="small" data-lc="accept">Prihvati prijateljstvo</button>`;
@@ -918,7 +920,7 @@
       <div class="panel">
         <h2>Igrači</h2>
         <ul class="seats">${r.seats.map((s, i) => `<li>
-          ${avatar(s, 'md')}
+          ${s && s.uname && loggedIn() ? `<button class="prof-link" data-prof="${esc(s.uname)}" title="Profil igrača">${avatar(s, 'md')}</button>` : avatar(s, 'md')}
           <span class="n">${s ? esc(s.name) + (i === r.you ? ' (ti)' : '') + ' ' + tiHtml(s.cos) : '<span class="muted">čeka se igrač…</span>'}${s && s.st ? `<span class="cmt">🏆 ${s.st.w} pobjeda · ⏱ ${fmtHours(s.st.t)} odigrano</span>` : ''}${s && s.wallet != null && (r.kind === 'poker' || r.tour) ? `<span class="cmt">${walletHtml(s.wallet)}</span>` : ''}</span>
           ${r.mode === 4 && !solo(r.kind) ? `<span class="tag team${i % 2}">${i % 2 ? 'Par B' : 'Par A'}</span>` : ''}
           ${r.kind === 'covjece' ? `<span class="cj-dot c${CJ.COLORS[r.mode][i]}" title="${CJ.COLOR_NAMES[CJ.COLORS[r.mode][i]]}"></span>` : ''}
@@ -2146,7 +2148,37 @@
     const sl = el.querySelector('#shopLogin'); if (sl) sl.onclick = () => { acc.err = ''; modal = 'account'; render(); };
   }
   // pregled na vrhu statistike: vrijeme igranja, partije, pobjede, uspješnost, najdraža igra
-  function statSummaryHtml(st) {
+  // ---------- profil igrača (njegova statistika) ----------
+  function openProfile(uname) {
+    if (!loggedIn() || !net) { toast('Prijavi se da vidiš profile igrača.'); return; }
+    if (lobby.open) setLobby(false);
+    acc.prof = null; modal = 'profile';
+    net.send({ type: 'userInfo', uname });
+    render();
+  }
+  document.addEventListener('click', e => {
+    const b = e.target.closest && e.target.closest('[data-prof]');
+    if (b) { e.preventDefault(); e.stopPropagation(); openProfile(b.dataset.prof); }
+  }, true);
+  function profileHtml() {
+    const p = acc.prof;
+    if (!p) return `<h2>Profil</h2><p class="muted" style="text-align:center">Učitavam…</p><button id="close" style="width:100%">Zatvori</button>`;
+    const st = p.stats || {};
+    const rows = STAT_ROWS.map(([k, n]) => {
+      const a = (st.online || {})[k] || {}, b = (st.bots || {})[k] || {};
+      const pp = (a.p || 0) + (b.p || 0), w = (a.w || 0) + (b.w || 0);
+      return pp ? `<tr><td>${n}</td><td>${pp}</td><td>${w}</td><td>${Math.round(100 * w / pp)}%</td></tr>` : '';
+    }).join('');
+    const since = p.created ? new Date(p.created).toLocaleDateString('hr-HR', { day: 'numeric', month: 'numeric', year: 'numeric' }) : '';
+    const fr = p.friend === 'ok' ? (p.at ? '🟢 ' + friendWhere({ at: p.at }) : 'prijatelj/ica') : '';
+    return `<div class="acc-head prof-head">${avatar({ av: p.av, name: p.name, cos: p.cos }, 'lg')}<div><b>${esc(p.name)}</b> ${tiHtml(p.cos)}
+        <div class="muted">${esc(p.uname)}${since ? ' · igra od ' + since : ''}</div>${fr ? `<div class="muted">${esc(fr)}</div>` : ''}</div></div>
+      ${statSummaryHtml(st, true)}
+      ${p.kviz ? `<div class="wallet-box"><div>Kviz bodovi</div><b>⭐ ${kvPts(p.kviz)}</b></div>` : ''}
+      ${rows ? `<table class="scores stats"><tr><th>Igra</th><th>Partija</th><th>Pobjede</th><th>%</th></tr>${rows}</table>` : '<p class="muted" style="text-align:center">Još nema odigranih partija.</p>'}
+      <div class="row" style="margin-top:12px">${p.me ? '<button class="ghost" id="profMine">📊 Moja statistika</button>' : p.friend === 'ok' ? `<button class="ghost" id="profDm" data-id="${p.id}">💬 Poruka</button>` : ''}<button id="close">Zatvori</button></div>`;
+  }
+  function statSummaryHtml(st, other) {
     const x = statSum(st);
     const sec = k => Object.values(st[k] || {}).reduce((t, y) => t + (y.t || 0), 0);
     let fav = null, favP = 0;
@@ -2158,7 +2190,7 @@
         ${tile('🏆', x.w, 'pobjeda')}
         ${tile('📈', x.p ? Math.round(100 * x.w / x.p) + '%' : '–', 'uspješnost')}
       </div>
-      <p class="muted st-note">${fav ? `Najdraža igra: <b>${esc(fav)}</b> (${favP} partija). ` : ''}Online: ${fmtTime(sec('online'))}, protiv botova: ${fmtTime(sec('bots'))}. Vrijeme igranja broji se od verzije 1.20.0.</p>`;
+      <p class="muted st-note">${fav ? `Najdraža igra: <b>${esc(fav)}</b> (${favP} partija). ` : ''}Online: ${fmtTime(sec('online'))}, protiv botova: ${fmtTime(sec('bots'))}.${other ? '' : ' Vrijeme igranja broji se od verzije 1.20.0.'}</p>`;
   }
   function statsHtml() {
     const st = (acc.user && acc.user.stats) || {};
@@ -2272,8 +2304,9 @@
         if (f.unread) sub = f.unread === 1 ? 'Nova poruka' : f.unread + (f.unread < 5 ? ' nove poruke' : ' novih poruka');
         btns += `<button class="ghost small" data-frem="${f.id}" data-fname="${esc(f.name)}" aria-label="Ukloni">✕</button>`;
       }
-      return `<li class="${f.at ? 'online' : ''}${f.unread ? ' unread' : ''}">${avatar({ av: f.av, name: f.name, cos: f.cos }, 'md', f.status === 'ok' ? `<span class="pres ${f.at ? 'on' : ''}"></span>` : '')}
-        <span class="n"><b>${esc(f.name)}</b> ${tiHtml(f.cos)} <span class="muted">${esc(f.uname)}</span><span class="sub">${esc(sub)}</span></span>${btns}</li>`;
+      const stl = f.st ? `<span class="fst" title="${stTitle(f.st)}">🏆 ${f.st.w} · 🃏 ${f.st.p} · ⏱ ${fmtHours(f.st.t)}</span>` : '';
+      return `<li class="${f.at ? 'online' : ''}${f.unread ? ' unread' : ''}"><button class="prof-link" data-prof="${esc(f.uname)}" title="Profil">${avatar({ av: f.av, name: f.name, cos: f.cos }, 'md', f.status === 'ok' ? `<span class="pres ${f.at ? 'on' : ''}"></span>` : '')}</button>
+        <span class="n prof-link" data-prof="${esc(f.uname)}"><b>${esc(f.name)}</b> ${tiHtml(f.cos)} <span class="muted">${esc(f.uname)}</span>${stl}<span class="sub">${esc(sub)}</span></span>${btns}</li>`;
     };
     return `<h2>Prijatelji</h2>
       <form id="fAdd" class="row" autocomplete="off"><input id="fName" maxlength="20" placeholder="Korisničko ime prijatelja" autocapitalize="off" spellcheck="false"><button type="submit" style="flex:0 0 auto">Dodaj</button></form>
@@ -2427,6 +2460,8 @@
     el.querySelectorAll('[data-finv]').forEach(b => b.onclick = () => net.send({ type: 'invite', id: +b.dataset.finv }));
     el.querySelectorAll('[data-fjoin]').forEach(b => b.onclick = () => joinRoomCode(b.dataset.fjoin));
     el.querySelectorAll('[data-fmsg]').forEach(b => b.onclick = () => openDm(+b.dataset.fmsg));
+    const pm = el.querySelector('#profMine'); if (pm) pm.onclick = () => { modal = 'stats'; net && net.send({ type: 'account' }); render(); };
+    const pd = el.querySelector('#profDm'); if (pd) pd.onclick = () => { modal = null; render(); openDm(+pd.dataset.id); };
   }
 
   // ---------- kutija za prijedloge: pišu prijavljeni, popis vidi samo admin ----------
@@ -2513,6 +2548,7 @@
     else if (modal === 'sug') html = sugHtml();
     else if (modal === 'account') html = accountHtml();
     else if (modal === 'stats') html = statsHtml();
+    else if (modal === 'profile') html = profileHtml();
     else if (modal === 'shop') html = shopHtml();
     else if (modal === 'history') html = acc.game ? gameLogHtml(acc.game) : historyHtml();
     else if (modal === 'friends') html = friendsHtml();

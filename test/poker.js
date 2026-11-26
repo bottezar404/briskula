@@ -3,21 +3,33 @@ const P = require('../public/poker.js'); const PB = require('../public/poker-bot
 const assert = require('assert');
 const ev = s => P.evaluate(s.split(' '));
 const H = s => P.catOf(ev(s));
-// kategorije
-assert.strictEqual(H('kupe-1 kupe-13 kupe-12 kupe-11 kupe-7'), 8); // skala u boji (7-A)
-assert.strictEqual(H('kupe-1 dinari-2 spade-3 bate-4 kupe-5'), 3);  // skala A-5
-assert.strictEqual(H('kupe-7 dinari-11 spade-12 bate-13 kupe-1'), 3); // 7-F-C-K-A je skala
-assert.strictEqual(H('kupe-1 kupe-3 kupe-5 kupe-7 kupe-12'), 6);   // boja
-assert.strictEqual(H('kupe-1 dinari-1 spade-1 kupe-5 dinari-5'), 5); // ful
-assert.strictEqual(H('kupe-1 dinari-1 spade-1 kupe-5 dinari-7'), 4); // tris
-// poredak 40 karata: tris > skala, boja > ful
-assert(ev('kupe-2 dinari-2 spade-2 kupe-5 dinari-7') > ev('kupe-1 dinari-13 spade-12 bate-11 kupe-7'));
-assert(ev('kupe-2 kupe-4 kupe-5 kupe-7 kupe-6') > ev('kupe-1 dinari-1 spade-1 kupe-13 dinari-13'));
-assert(ev('kupe-2 dinari-3 spade-4 bate-5 kupe-6') > ev('kupe-1 dinari-2 spade-3 bate-4 kupe-5')); // 6-visoka > A-5
-assert(ev('kupe-1 dinari-1 spade-13 bate-4 kupe-5') > ev('kupe-13 dinari-13 spade-1 bate-4 kupe-5'));
-// 7 karata: tris i skala zajedno -> tris
-assert.strictEqual(H('kupe-3 dinari-3 spade-3 bate-4 kupe-5 dinari-6 spade-7'), 4);
-assert.strictEqual(P.handName(ev('kupe-1 dinari-1 spade-1 kupe-5 dinari-5')), 'Ful (asovi na petice)');
+// kategorije (standardni poker, 52 karte)
+assert.strictEqual(P.fullDeck().length, 52);
+assert.strictEqual(new Set(P.fullDeck()).size, 52);
+assert.strictEqual(H('herc-14 herc-13 herc-12 herc-11 herc-10'), 8); // kraljevska skala u boji
+assert.strictEqual(P.handName(ev('herc-14 herc-13 herc-12 herc-11 herc-10')), 'Kraljevska skala u boji');
+assert.strictEqual(H('pik-14 herc-2 karo-3 tref-4 pik-5'), 4);  // skala A-5
+assert.strictEqual(H('pik-10 herc-11 karo-12 tref-13 pik-14'), 4); // 10-A skala
+assert.strictEqual(H('pik-13 herc-14 karo-2 tref-3 pik-4'), 0); // nema "okretanja" preko asa
+assert.strictEqual(H('karo-14 karo-3 karo-5 karo-7 karo-12'), 5);   // boja
+assert.strictEqual(H('pik-14 herc-14 karo-14 pik-5 herc-5'), 6); // ful
+assert.strictEqual(H('pik-14 herc-14 karo-14 pik-5 herc-7'), 3); // tris
+assert.strictEqual(H('pik-9 herc-9 karo-9 tref-9 herc-7'), 7); // poker
+// standardni poredak: skala > tris, ful > boja, boja > skala
+assert(ev('pik-2 herc-3 karo-4 tref-5 pik-6') > ev('pik-14 herc-14 karo-14 tref-13 pik-12'));
+assert(ev('pik-2 herc-2 karo-2 pik-5 herc-5') > ev('karo-14 karo-13 karo-12 karo-11 karo-9'));
+assert(ev('karo-2 karo-4 karo-5 karo-7 karo-9') > ev('pik-10 herc-11 karo-12 tref-13 pik-14'));
+assert(ev('pik-2 herc-3 karo-4 tref-5 pik-6') > ev('pik-14 herc-2 karo-3 tref-4 pik-5')); // 6-visoka > A-5
+assert(ev('pik-14 herc-14 karo-13 tref-4 pik-5') > ev('pik-13 herc-13 karo-14 tref-4 pik-5'));
+assert(ev('pik-10 herc-10 karo-14 tref-4 pik-5') > ev('pik-10 herc-10 karo-13 tref-4 pik-5')); // kicker
+// 7 karata: tris i skala zajedno -> skala; boja i skala -> boja
+assert.strictEqual(H('pik-3 herc-3 karo-3 tref-4 pik-5 herc-6 karo-7'), 4);
+assert.strictEqual(H('karo-3 karo-8 karo-10 karo-12 karo-2 pik-4 tref-5'), 5);
+assert.strictEqual(H('pik-3 herc-3 karo-3 tref-5 pik-5 herc-5 karo-7'), 6); // dva trisa = ful
+assert.strictEqual(P.handName(ev('pik-14 herc-14 karo-14 pik-5 herc-5')), 'Ful (asovi na petice)');
+assert.strictEqual(P.handName(ev('pik-12 herc-12 karo-11 tref-11 pik-5')), 'Dva para (dame i dečki)');
+assert.strictEqual(P.handName(ev('pik-12 herc-9 karo-2 tref-5 pik-7')), 'Visoka karta (Q)');
+assert.deepStrictEqual(P.bestFive('pik-14 herc-14 karo-14 pik-5 herc-5 tref-2 karo-9'.split(' ')).sort(), 'pik-14 herc-14 karo-14 pik-5 herc-5'.split(' ').sort());
 
 // sporedni lonac: A (100) all-in protiv B i C (po 300)
 {
@@ -25,8 +37,8 @@ assert.strictEqual(P.handName(ev('kupe-1 dinari-1 spade-1 kupe-5 dinari-5')), 'F
   st.players[0].chips = 100; st.players[1].chips = 300; st.players[2].chips = 300;
   // namjesti ruku ručno
   for (const pl of st.players) { pl.total = 0; pl.bet = 0; pl.folded = false; pl.allIn = false; }
-  st.players[0].hole = ['kupe-1', 'dinari-1']; st.players[1].hole = ['kupe-13', 'dinari-13']; st.players[2].hole = ['kupe-2', 'dinari-4'];
-  st.board = ['spade-1', 'bate-13', 'kupe-5', 'dinari-6', 'spade-11'];
+  st.players[0].hole = ['pik-14', 'herc-14']; st.players[1].hole = ['pik-13', 'herc-13']; st.players[2].hole = ['pik-2', 'herc-4'];
+  st.board = ['karo-14', 'tref-13', 'pik-5', 'herc-8', 'karo-11'];
   st.players[0].total = 100; st.players[0].chips = 0; st.players[0].allIn = true;
   st.players[1].total = 300; st.players[1].chips = 0; st.players[1].allIn = true;
   st.players[2].total = 300; st.players[2].chips = 0; st.players[2].allIn = true;

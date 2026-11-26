@@ -22,7 +22,7 @@
     if (x === y) s += 8 + x * 0.4;
     if (P.suitOf(a) === P.suitOf(b)) s += 2;
     if (hi - lo === 1) s += 1.2; else if (hi - lo === 2) s += 0.5;
-    return s; // ~4.5 (7-2) … ~27 (A-A)
+    return s; // ~8 (7-2) … ~35 (A-A)
   }
 
   /** vjerojatnost pobjede (izjednačenje se dijeli) protiv nOpp protivnika */
@@ -41,7 +41,7 @@
       for (let o = 0; o < nOpp; o++) {
         let a = take(), b = take();
         // protivnik koji je povisio rjeđe ima slabu ruku: slabe ruke ponekad zamijeni
-        if (tight && tight[o] && k + 2 <= n && preScore(a, b) < 13 && rng() < tight[o]) { a = take(); b = take(); }
+        if (tight && tight[o] && k + 2 <= n && preScore(a, b) < 15 && rng() < tight[o]) { a = take(); b = take(); }
         opps.push([a, b]);
       }
       const full = board.slice();

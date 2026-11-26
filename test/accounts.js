@@ -6,6 +6,7 @@ if (!process.env.DATABASE_URL) process.env.BRK_DATA_FILE = ':memory:';
 const assert = require('assert');
 const WebSocket = require('ws');
 const server = require('../server/index.js');
+const PB = require('../public/poker-bot.js');
 
 function client(port, name, auth) {
   const ws = new WebSocket(`ws://localhost:${port}/ws`);
@@ -17,7 +18,10 @@ function client(port, name, auth) {
     if (m.type === 'room') {
       c.room = m;
       const g = m.game;
-      if (c.autoplay && g && g.phase === 'play' && g.turn === g.you) c.send({ type: 'play', card: g.hand[0] });
+      if (c.autoplay && g && g.kind === 'poker') {
+        if (g.phase === 'play' && g.legal) c.send({ type: 'play', card: PB.choose(g, 'easy') });
+        if (g.phase === 'hand' && !m.ready.includes(g.you) && !g.players[g.you].out) c.send({ type: 'next' });
+      } else if (c.autoplay && g && g.phase === 'play' && g.turn === g.you) c.send({ type: 'play', card: g.hand[0] });
     }
     c.waiters = c.waiters.filter(w => !w(m));
   });
@@ -135,6 +139,36 @@ const uniq = 'u' + Date.now().toString(36).slice(-6);
   assert.deepStrictEqual(ua.stats.bots.treseta_meno, { p: 1, w: 1, d: 0 });
   assert(stBot);
   console.log('statistika protiv botova ok');
+
+  // žetoni za poker: novi račun ima 5000; partija protiv botova (pobjeda u troje +2000, poraz −1000)
+  assert.strictEqual(accA.user.chips, 5000);
+  const ub0 = server.accounts.byUname('bruno_' + uniq);
+  a.send({ type: 'stat', kind: 'poker', res: 'w', mode: 3 });
+  await a.until(m => m.type === 'account' && m.user.chips === 7000, 'pobjeda protiv botova');
+  assert.strictEqual(ua.chipsLast.d, 2000);
+  a.send({ type: 'stat', kind: 'poker', res: 'l', mode: 3 }); // poraz se upiše i odmah nakon pobjede
+  await a.until(m => m.type === 'account' && m.user.chips === 6000, 'poraz protiv botova');
+  // online poker u dvoje: pobjednik dobije ulog drugoga, u sobi se vide žetoni
+  b.send({ type: 'variant', kind: 'poker' });
+  const pl = await b.until(m => m.type === 'room' && m.kind === 'poker' && m.seats.every(x => x), 'poker soba');
+  assert.deepStrictEqual(pl.seats.map(x => x.wallet).sort(), [5000, 6000]);
+  b.send({ type: 'start' });
+  const pOver = await a.until(m => m.type === 'room' && m.game && m.game.kind === 'poker' && m.game.phase === 'over', 'kraj pokera');
+  const aWon = pOver.game.result.winners.includes(pOver.you);
+  await a.until(m => m.type === 'account' && m.user.chips === (aWon ? 7000 : 5000), 'žetoni nakon pokera');
+  assert.strictEqual(ub0.chips, aWon ? 4000 : 6000);
+  // napuštanje pokera usred partije: ulog je izgubljen odmah
+  a.autoplay = b.autoplay = false;
+  b.send({ type: 'start' });
+  await a.until(m => m.type === 'room' && m.game && m.game.phase !== 'over', 'nova partija');
+  const before = ua.chips;
+  a.send({ type: 'leave' });
+  await a.until(m => m.type === 'account' && m.user.chips === before - 1000, 'izgubljen ulog');
+  // dopuna kad padne ispod 1000
+  ua.chips = 1500;
+  assert.strictEqual(server.accounts.addChips(ua, -1000), 1000);
+  assert.strictEqual(ua.refills, 1); assert(ua.chipsLast.refill);
+  console.log('žetoni ok');
 
   // odjava: Bruno vidi da Ana više nije online
   a.autoplay = b.autoplay = false;

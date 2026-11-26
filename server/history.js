@@ -51,7 +51,7 @@ function instrument(engines) {
       const last = lastLog(g), qi = g.qi;
       const ok = play.call(this, g, p, mv, ...rest);
       if (ok) {
-        if (g.kind === 'kviz') push(g, { p, q: qi, m: String(mv) });
+        if (g.kind === 'kviz') { const an = g.players[p] && g.players[p].ans; push(g, { p, q: qi, m: String(mv).slice(0, 60), ok: !!(an && an.ok) }); }
         else if (hasLog(g)) addLog(g, logSince(g, last));
         else push(g, { p, c: String(mv) });
       }
@@ -104,7 +104,7 @@ function build(r, g, players) {
     },
     moves,
   };
-  if (g.kind === 'kviz') doc.qs = g.qs.map(q => ({ text: q.text, opts: q.opts, ans: q.ans, round: q.round, mult: q.mult }));
+  if (g.kind === 'kviz') doc.qs = g.qs.map(q => ({ text: q.text, opts: q.opts, ans: q.ans, answer: q.answer || null, round: q.round, mult: q.mult }));
   return doc;
 }
 

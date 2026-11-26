@@ -19,6 +19,8 @@ const KV = require('../public/kviz.js');
 const KB = require('../public/kviz-bot.js');
 const Store = require('./store.js');
 const Accounts = require('./accounts.js');
+const History = require('./history.js');
+History.instrument([E, T, P, CJ, KV]); // povijest online partija (bilježi samo partije prijavljene s History.begin)
 const ACC = Accounts.create(Store.open());
 // igra: briškula ili trešeta; low = "Chi fa meno" (na manje) za obje
 // (stari klijenti šalju kind 'meno' = briškula na manje)
@@ -318,6 +320,12 @@ function startGame(r) {
   // tko je za stolom s računom (za statistiku; tko izađe usred partije, upiše mu se poraz)
   r.uids = r.seats.map(s => { const c = !s.bot && clients.get(s.token); return c && c.uid || null; });
   r.humans = r.seats.filter(s => !s.bot).length;
+  // povijest: bilježe se online partije (barem dva čovjeka) u kojima je netko prijavljen
+  r.histPlayers = null;
+  if (r.humans >= 2 && r.uids.some(Boolean)) {
+    r.histPlayers = r.seats.map((s, i) => { const u = r.uids[i] && ACC.user(r.uids[i]); return { name: s.name, bot: !!s.bot, uname: u ? u.uname : null }; });
+    History.begin(r.game);
+  }
   // poker: žetoni s računa (ulog = početni žetoni za stolom), obračun na kraju partije
   r.chipUids = r.kind === 'poker' ? r.uids.slice() : null;
   broadcast(r); schedule(r);
@@ -333,6 +341,11 @@ function recordStats(r, g) {
   const key = Accounts.statKey(r.kind, r.low);
   // zadnja igra turnira: upiši i cijeli turnir (pobjeda = prvo mjesto)
   const st = r.tour && r.tour.done ? TR.standings(r.tour) : null;
+  if (r.histPlayers) {
+    const doc = History.build(r, g, r.histPlayers);
+    if (doc) ACC.saveGame(doc, r.uids.slice());
+    r.histPlayers = null;
+  }
   r.uids.forEach((uid, i) => {
     const u = uid && ACC.user(uid);
     if (!u) return;
@@ -567,7 +580,7 @@ function accountMsg(u, c, withImg) {
   const fv = friendsView(u, c);
   return {
     type: 'account', storage: ACC.kind,
-    user: Object.assign({ id: u.id, uname: u.uname, name: u.name, av: u.av, cm: u.cm, stats: u.stats, chips: ACC.chipsOf(u), refills: u.refills || 0, chipsLast: u.chipsLast || null, lobbyAdmin: isAdmin(u) }, withImg ? { img: u.img } : {}),
+    user: Object.assign({ id: u.id, uname: u.uname, name: u.name, av: u.av, cm: u.cm, stats: u.stats, chips: ACC.chipsOf(u), refills: u.refills || 0, chipsLast: u.chipsLast || null, lobbyAdmin: isAdmin(u), admin: isAppAdmin(u), tempPass: !!u.tempPass }, withImg ? { img: u.img } : {}),
     friends: fv.list, imgs: fv.imgs,
   };
 }
@@ -636,7 +649,10 @@ const DM_MSGS = new Set(['dmOpen', 'dmRead', 'dmSend']);
 // Poruke se čuvaju u bazi (zadnjih 100). LOBBY_ADMINS = korisnička imena (zarezom) koja smiju brisati tuđe poruke.
 const LOBBY_LEN = 200, LOBBY_GAP = 1500, LOBBY_BURST = 6, LOBBY_WIN = 30000;
 const LOBBY_ADMINS = new Set(String(process.env.LOBBY_ADMINS || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean));
-const isAdmin = u => !!u && LOBBY_ADMINS.has(u.uname.toLowerCase());
+// ADMINS = admini aplikacije (reset lozinke, povijest partija svih igrača); zadano Botti. Admini smiju i sve iz LOBBY_ADMINS.
+const ADMINS = new Set(String(process.env.ADMINS || 'Botti').split(',').map(s => s.trim().toLowerCase()).filter(Boolean));
+const isAppAdmin = u => !!u && ADMINS.has(u.uname.toLowerCase());
+const isAdmin = u => !!u && (LOBBY_ADMINS.has(u.uname.toLowerCase()) || isAppAdmin(u));
 function userCard(uid) {
   const u = ACC.user(uid);
   if (!u) return { id: uid, name: 'Igrač', uname: '', av: 'e0', cm: 0 };
@@ -740,6 +756,40 @@ function accountMessage(m, token, c, ws, ip) {
       const res = ACC.changePass(u, m.old, m.pass);
       return res.error ? authErr(res.error) : send(ws, { type: 'info', msg: 'Lozinka je promijenjena.' });
     }
+    case 'adminReset': {
+      if (!isAppAdmin(u)) return err('To smije samo admin.');
+      const t = ACC.byUname(m.uname);
+      if (!t) return err('Nema korisnika s tim imenom.');
+      const pass = ACC.resetPass(t);
+      // sve prijave tog korisnika se odjave
+      for (const tk of [...tokensOf(t.id)]) {
+        const tc = clients.get(tk);
+        if (!tc) continue;
+        detach(tk, tc);
+        if (tc.ws) send(tc.ws, { type: 'account', user: null, friends: [], expired: true });
+      }
+      send(ws, { type: 'adminReset', uname: t.uname, pass });
+      return;
+    }
+    case 'history': {
+      if (!u) return;
+      let who = u;
+      if (m.uname && String(m.uname).toLowerCase() !== u.uname.toLowerCase()) {
+        if (!isAppAdmin(u)) return err('Tuđu povijest vidi samo admin.');
+        who = ACC.byUname(m.uname);
+        if (!who) return err('Nema korisnika s tim imenom.');
+      }
+      send(ws, { type: 'history', uname: who.uname, mine: who === u, list: ACC.history(who) });
+      return;
+    }
+    case 'game': {
+      if (!u) return;
+      const d = ACC.game(m.id);
+      if (!d || !(d.uids.includes(u.id) || isAppAdmin(u))) return err('Ta partija više nije spremljena.');
+      const { uids, ...doc } = d;
+      send(ws, { type: 'game', game: Object.assign(doc, { me: uids.indexOf(u.id) }) });
+      return;
+    }
     case 'friendAdd': {
       if (!u) return err('Prijavi se da dodaš prijatelje.');
       const res = ACC.befriend(u, m.uname);
@@ -789,7 +839,7 @@ function accountMessage(m, token, c, ws, ip) {
     }
   }
 }
-const ACCOUNT_MSGS = new Set(['register', 'login', 'logout', 'account', 'password', 'friendAdd', 'friendAccept', 'friendRemove', 'invite', 'stat', ...DM_MSGS]);
+const ACCOUNT_MSGS = new Set(['register', 'login', 'logout', 'account', 'password', 'friendAdd', 'friendAccept', 'friendRemove', 'invite', 'stat', 'adminReset', 'history', 'game', ...DM_MSGS]);
 
 wss.on('connection', (ws, req) => {
   let token = null;

@@ -900,3 +900,24 @@ ul.notes li div { margin-top: 2px; }
   .seg[data-seg="kind"], .seg[data-seg="roomKind"] { flex-wrap: wrap; }
   .seg[data-seg="kind"] button, .seg[data-seg="roomKind"] button { flex: 1 0 30%; }
 }
+
+/* ---------- povijest partija, admin ---------- */
+.hist { list-style: none; margin: 0 0 10px; padding: 0; }
+.hist li + li { margin-top: 6px; }
+.hist-item { width: 100%; display: flex; align-items: center; gap: 10px; text-align: left; background: rgba(0,0,0,.2); color: var(--cream); font-weight: 500; padding: 9px 12px; border-radius: 10px; }
+.hist-item .hk { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.hist-item .hk .muted { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hres { flex: 0 0 auto; font-size: 12px; font-weight: 800; padding: 3px 8px; border-radius: 8px; }
+.hres.win { background: #2f8f52; color: #fff; } .hres.loss { background: rgba(184,50,42,.85); color: #fff; } .hres.draw { background: rgba(255,255,255,.18); }
+.glog-res { text-align: center; margin: 6px 0 8px; }
+.glog { background: rgba(0,0,0,.2); border-radius: 10px; padding: 8px 10px; font-size: 13px; line-height: 1.45; }
+.glog .lh { color: var(--gold); font-weight: 700; margin: 8px 0 2px; }
+.glog .lh:first-child { margin-top: 0; }
+.glog .ll { padding: 2px 0; border-bottom: 1px solid rgba(255,255,255,.06); }
+.glog .ll .n { display: inline-block; min-width: 22px; opacity: .6; }
+.glog .won { color: #8be0a6; font-weight: 600; }
+.glog .ic { white-space: nowrap; font-weight: 600; }
+.glog .fc { white-space: nowrap; font-weight: 700; background: var(--cream); color: var(--ink); border-radius: 4px; padding: 0 3px; }
+.glog .fc.red { color: var(--red); }
+.okbox { background: rgba(63,191,106,.15); border-radius: 8px; padding: 8px 10px; font-size: 14px; margin: 8px 0 0; }
+.okbox code { font-size: 17px; font-weight: 800; color: var(--gold); letter-spacing: 1px; }

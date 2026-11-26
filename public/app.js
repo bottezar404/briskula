@@ -81,7 +81,7 @@
   }
 
   // ---------- korisnički račun (nije obavezan: bez prijave se igra kao gost) ----------
-  const acc = { user: null, friends: [], storage: null, err: '', tab: 'login', busy: false };
+  const acc = { user: null, friends: [], storage: null, err: '', tab: 'login', busy: false, hist: null, game: null, reset: null };
   const loggedIn = () => !!acc.user;
   const STAT_ROWS = [['briskula', 'Briškula'], ['briskula_meno', 'Briškula · ' + LOW_NAME], ['treseta', 'Trešeta'], ['treseta_meno', 'Trešeta · ' + LOW_NAME], ['poker', 'Poker'], ['turnir', 'Turnir'], ['covjece', CJ_NAME], ['kviz', KV_NAME]];
   let profSent = '', profTimer = null;
@@ -116,6 +116,8 @@
     }
     if (m.user) lobbySub(); // prijavljeni odmah vide nove poruke u grupnom chatu (brojka na gumbu)
     if (!was && m.user && modal === 'account') modal = null;
+    // prijava s privremenom lozinkom (admin reset): odmah ponudi promjenu
+    if (!was && m.user && m.user.tempPass) { modal = 'account'; acc.err = ''; }
     acc.busy = false;
     if (!room || modal || !room.game || room.game.phase === 'over') render();
   }
@@ -332,6 +334,9 @@
         else if (m.type === 'account') onAccount(m);
         else if (m.type === 'authError') { acc.err = m.msg; acc.busy = false; if (modal === 'account') render(); else toast(m.msg); }
         else if (m.type === 'invite') showInvite(m);
+        else if (m.type === 'history') { acc.hist = m; acc.game = null; if (modal === 'history') render(); }
+        else if (m.type === 'game') { acc.game = m.game; if (modal === 'history') render(); }
+        else if (m.type === 'adminReset') { acc.reset = m; if (modal === 'account') render(); }
         else if (m.type === 'dm' || m.type === 'dmMsg' || m.type === 'dmSeen' || m.type === 'dmRead') onDm(m);
         else if (m.type === 'lobby' || m.type === 'lobbyMsg' || m.type === 'lobbyDel' || m.type === 'lobbyWho') onLobby(m);
       };
@@ -1877,7 +1882,9 @@
         <div class="acc-head">${avatar({ av: myAv(), name: S.name, cm: S.cm }, 'lg')}<div><b>${esc(S.name || u.name)}</b><div class="muted">korisničko ime: ${esc(u.uname)}</div></div></div>
         <p class="muted">Ime, avatar i dužina pišulinca spremaju se u račun, pa ih imaš na svakom uređaju gdje se prijaviš. Prijatelji te dodaju po korisničkom imenu.</p>
         ${storageNote()}
-        <details class="pw"><summary>Promijeni lozinku</summary>
+        ${u.tempPass ? '<p class="warn">Prijavljen/a si s <b>privremenom lozinkom</b> koju ti je dao admin. Promijeni je ispod (stara lozinka = privremena).</p>' : ''}
+        <button class="ghost" id="histBtn" style="width:100%">🕘 Povijest partija</button>
+        <details class="pw" ${u.tempPass ? 'open' : ''}><summary>Promijeni lozinku</summary>
           <form id="pwForm" class="stack" autocomplete="on">
             <input type="password" id="pwOld" placeholder="Stara lozinka" autocomplete="current-password">
             <input type="password" id="pwNew" placeholder="Nova lozinka (barem 6 znakova)" autocomplete="new-password">
@@ -1885,6 +1892,11 @@
             <button type="submit" class="ghost">Spremi lozinku</button>
           </form>
         </details>
+        ${u.admin ? `<details class="pw admin" ${acc.reset ? 'open' : ''}><summary>Admin</summary>
+          <form id="admReset" class="row" autocomplete="off"><input id="admUser" maxlength="20" placeholder="Korisničko ime" autocapitalize="off" spellcheck="false"><button type="submit" class="ghost" style="flex:0 0 auto">Reset lozinke</button></form>
+          ${acc.reset ? `<p class="okbox">Nova privremena lozinka za <b>${esc(acc.reset.uname)}</b>: <code>${esc(acc.reset.pass)}</code> <button class="ghost small" id="admCopy">Kopiraj</button><br><span class="muted">Pošalji mu je; nakon prijave neka je promijeni. Sve njegove prijave su odjavljene.</span></p>` : ''}
+          <form id="admHist" class="row" autocomplete="off" style="margin-top:8px"><input id="admHUser" maxlength="20" placeholder="Korisničko ime" autocapitalize="off" spellcheck="false"><button type="submit" class="ghost" style="flex:0 0 auto">Povijest partija</button></form>
+        </details>` : ''}
         <div class="row" style="margin-top:12px"><button class="ghost" id="logout">Odjava</button><button id="close">Zatvori</button></div>`;
     }
     const reg = acc.tab === 'register';
@@ -1916,6 +1928,7 @@
     };
     return `<h2>Statistika</h2>
       <p class="muted" style="text-align:center;margin-top:-4px">${esc(acc.user ? acc.user.uname : '')}</p>
+      ${acc.user ? '<button class="ghost" id="histBtn" style="width:100%;margin-bottom:10px">🕘 Povijest partija (tko je što odigrao)</button>' : ''}
       ${acc.user ? `<div class="wallet-box"><div>Žetoni za poker</div><b>${walletHtml(acc.user.chips)}</b></div>
       <p class="muted">Svaka partija pokera košta ulog od ${fmtChips(P.START_CHIPS)} žetona, a na kraju ti se na račun vrati ono s čim završiš (pobjednik dobije žetone svih igrača za stolom). Ako napustiš partiju prije kraja, gubiš ulog. Tko padne ispod ${fmtChips(1000)} žetona, dobije besplatnu dopunu do ${fmtChips(1000)}${acc.user.refills ? ` (dosad dopunjeno ${acc.user.refills}×)` : ''}.</p>` : ''}
       ${table('online', 'Online (s drugim igračima)')}
@@ -2020,7 +2033,111 @@
       ${inRoom ? '<p class="muted">Prijatelji koji su online dobit će poziv u tvoju sobu.</p>' : ''}
       <button id="close" style="width:100%">Zatvori</button>`;
   }
+  // ---------- povijest partija ----------
+  function openHistory(uname) {
+    acc.hist = null; acc.game = null; modal = 'history';
+    net && net.send(Object.assign({ type: 'history' }, uname ? { uname } : {}));
+    render();
+  }
+  const RES_TXT = { w: ['Pobjeda', 'win'], l: ['Poraz', 'loss'], d: ['Neriješeno', 'draw'] };
+  const kindTxt = (k, low) => (KIND_NAMES[k] || k) + (low && (k === 'briskula' || k === 'treseta') ? ' · ' + LOW_NAME : '');
+  const dateTxt = t => new Date(t).toLocaleString('hr-HR', { day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit' });
+  function historyHtml() {
+    const h = acc.hist;
+    if (!h) return `<h2>Povijest partija</h2><p class="muted" style="text-align:center">Učitavam…</p><button id="close" style="width:100%">Zatvori</button>`;
+    const rows = h.list.map(x => {
+      const [rt, rc] = x.me >= 0 ? RES_TXT[x.res] : ['', ''];
+      return `<li><button class="hist-item" data-game="${esc(x.id)}">
+        <span class="hk"><b>${esc(kindTxt(x.kind, x.low))}</b>${x.tour ? ' <span class="muted">(turnir)</span>' : ''}<span class="muted">${esc(dateTxt(x.t))} · ${esc(x.players.join(', '))}</span></span>
+        ${rt ? `<span class="hres ${rc}">${rt}${x.forfeit != null ? ' ⏱' : ''}</span>` : ''}</button></li>`;
+    }).join('');
+    return `<h2>Povijest partija</h2>
+      ${h.mine ? '' : `<p class="muted" style="text-align:center;margin-top:-4px">igrač: <b>${esc(h.uname)}</b></p>`}
+      ${h.list.length ? `<ul class="hist">${rows}</ul>` : '<p class="muted" style="text-align:center">Još nema spremljenih partija.</p>'}
+      <p class="muted">Spremaju se online partije (s barem dva igrača) – zadnjih 20. Klikni partiju da vidiš tko je što odigrao.</p>
+      <button id="close" style="width:100%">Zatvori</button>`;
+  }
+  // ime karte: talijanske (briškula, trešeta) i francuske (poker)
+  const IT_SUIT = { kupe: 'kupe', dinari: 'dinari', spade: 'špade', bate: 'bate' };
+  const IT_RANK = { 1: 'as', 2: 'dvica', 3: 'trica', 4: 'četvorka', 5: 'petica', 6: 'šestica', 7: 'sedmica', 11: 'fanat', 12: 'konj', 13: 'kralj' };
+  const FR_SUIT = { tref: '♣', karo: '♦', herc: '♥', pik: '♠' };
+  const FR_RANK = { 11: 'J', 12: 'Q', 13: 'K', 14: 'A' };
+  function cardTxt(c) {
+    const [su, r] = String(c).split('-');
+    if (FR_SUIT[su]) return `<span class="fc ${su === 'karo' || su === 'herc' ? 'red' : ''}">${FR_RANK[r] || r}${FR_SUIT[su]}</span>`;
+    return `<span class="ic">${IT_RANK[r] || r} ${IT_SUIT[su] || su}</span>`;
+  }
+  const cardsTxt = cs => (cs || []).map(cardTxt).join(' ');
+  function gameLogHtml(g) {
+    const nm = p => p >= 0 && g.players[p] ? esc(g.players[p].name) : '?';
+    const res = g.result;
+    const win = res.draw ? 'Neriješeno' : 'Pobjeda: ' + res.winners.map(nm).join(' i ');
+    const pts = v => g.kind === 'treseta' ? T.fmt(v) : v;
+    let body = '';
+    if (g.kind === 'briskula' || g.kind === 'treseta') {
+      let cur = [], n = 0;
+      for (const x of g.moves) {
+        if (x.h != null) {
+          if (g.kind === 'treseta') body += `<div class="lh">Ruka ${x.h || 1}</div>`;
+          if (x.trump) body += `<div class="ll muted">Briškula (okrenuta karta): ${cardTxt(x.trump)}</div>`;
+          for (const a of x.akuze || []) body += `<div class="ll muted">Akuža: ${nm(a.p)} – ${esc(a.text)} (+${a.pts})</div>`;
+          n = 0;
+        } else if (x.c) cur.push(`${nm(x.p)} ${cardTxt(x.c)}`);
+        else if (x.w != null) {
+          body += `<div class="ll"><span class="n">${++n}.</span> ${cur.join(' · ')} <span class="won">→ ${nm(x.w)}${x.pts ? ' +' + pts(x.pts) : ''}</span></div>`;
+          cur = [];
+        }
+      }
+      if (cur.length) body += `<div class="ll"><span class="n">${n + 1}.</span> ${cur.join(' · ')}</div>`;
+    } else if (g.kind === 'poker') {
+      const A = { sb: 'mali blind', bb: 'veliki blind', call: 'prati', check: 'provjerava', fold: 'odustaje', raise: 'povisuje na', bet: 'ulaže' };
+      const ST = ['', 'Flop', 'Turn', 'River'];
+      for (const x of g.moves) {
+        if (x.h != null) body += `<div class="lh">Ruka ${x.h}</div>`;
+        else if (x.a === 'street') body += `<div class="ll muted">${ST[x.street] || 'Stol'}: ${cardsTxt(x.board)}</div>`;
+        else if (x.a === 'end') continue;
+        else if (x.a) body += `<div class="ll">${nm(x.p)} ${A[x.a] || x.a}${x.amt != null && x.a !== 'check' && x.a !== 'fold' ? ' ' + x.amt : ''}${x.allIn ? ' (all-in)' : ''}</div>`;
+        else if (x.hr) {
+          const h = x.hr;
+          const sh = Object.entries(h.hands || {}).map(([p, v]) => `${nm(+p)}: ${cardsTxt(v.hole)} – ${esc(v.name)}`).join('<br>');
+          body += `<div class="ll won">${(h.delta || []).map((d, p) => d > 0 ? `${nm(p)} +${d}` : '').filter(Boolean).join(', ') || 'nitko ne dobiva'}${sh ? `<div class="muted">${sh}</div>` : ''}</div>`;
+        }
+      }
+    } else if (g.kind === 'covjece') {
+      for (const x of g.moves) {
+        if (x.a === 'roll') body += `<div class="ll">${nm(x.p)} baca 🎲 <b>${x.d}</b></div>`;
+        else if (x.a === 'move') body += `<div class="ll">${nm(x.p)} pomiče figuru ${x.i + 1}${x.from < 0 ? ' na ploču' : ` (${x.from} → ${x.to})`}${x.cap ? ` <span class="won">i izbacuje figuru igrača ${nm(x.cap.p)}</span>` : ''}</div>`;
+      }
+    } else if (g.kind === 'kviz') {
+      (g.qs || []).forEach((q, qi) => {
+        const ans = g.moves.filter(x => x.q === qi);
+        body += `<div class="lh">${qi + 1}. ${esc(q.text)}</div><div class="ll muted">Točno: ${esc(q.opts[q.ans])}</div>`;
+        for (const a of ans) { const k = +String(a.m).split(':')[1]; body += `<div class="ll">${nm(a.p)}: ${esc(q.opts[k] == null ? '?' : q.opts[k])} ${k === q.ans ? '✅' : '❌'}</div>`; }
+      });
+    }
+    const scores = (res.scores || []).map(s => `${s.players.map(nm).join(' i ')}: <b>${pts(s.points)}</b>`).join(' · ');
+    return `<h2>${esc(kindTxt(g.kind, g.low))}</h2>
+      <p class="muted" style="text-align:center;margin-top:-4px">${esc(dateTxt(g.t))}${g.tour ? ' · turnir' : ''}${g.target ? ' · do ' + g.target : ''}</p>
+      <p class="glog-res"><b>${win}</b>${res.forfeit != null ? ` <span class="muted">(${nm(res.forfeit)} nije odigrao/la na vrijeme)</span>` : ''}${res.kapot ? ' <span class="muted">(kapot)</span>' : ''}<br><span class="muted">${scores}</span></p>
+      <p class="muted">Igrači: ${g.players.map(p => esc(p.name) + (p.uname ? ` (${esc(p.uname)})` : p.bot ? ' (bot)' : '')).join(', ')}</p>
+      <div class="glog">${body || '<p class="muted">Nema zapisanih poteza.</p>'}</div>
+      <div class="row" style="margin-top:12px"><button class="ghost" id="histBack">← Natrag</button><button id="close">Zatvori</button></div>`;
+  }
+
   function bindAccountModal(el, refocus) {
+    const hb = el.querySelector('#histBtn'); if (hb) hb.onclick = () => openHistory();
+    el.querySelectorAll('[data-game]').forEach(b => b.onclick = () => net.send({ type: 'game', id: b.dataset.game }));
+    const bk = el.querySelector('#histBack'); if (bk) bk.onclick = () => { acc.game = null; render(); };
+    const ar = el.querySelector('#admReset');
+    if (ar) ar.onsubmit = e => {
+      e.preventDefault();
+      const v = el.querySelector('#admUser').value.trim();
+      if (v && window.confirm('Postaviti novu privremenu lozinku za ' + v + '? Stara više neće raditi.')) net.send({ type: 'adminReset', uname: v });
+    };
+    const ac = el.querySelector('#admCopy');
+    if (ac) ac.onclick = async () => { try { await navigator.clipboard.writeText(acc.reset.pass); toast('Kopirano'); } catch { toast(acc.reset.pass); } };
+    const ah = el.querySelector('#admHist');
+    if (ah) ah.onsubmit = e => { e.preventDefault(); const v = el.querySelector('#admHUser').value.trim(); if (v) openHistory(v); };
     el.querySelectorAll('[data-seg="accTab"] button').forEach(b => b.onclick = () => { acc.tab = b.dataset.v; acc.err = ''; render(); });
     const f = el.querySelector('#accForm');
     if (f) {
@@ -2087,6 +2204,7 @@
     else if (modal === 'notes') html = notesHtml();
     else if (modal === 'account') html = accountHtml();
     else if (modal === 'stats') html = statsHtml();
+    else if (modal === 'history') html = acc.game ? gameLogHtml(acc.game) : historyHtml();
     else if (modal === 'friends') html = friendsHtml();
     else if (modal === 'avatar') {
       const tiles = Array.from({ length: AV.N }, (_, i) => `<button class="av-opt ${S.avatar === 'e' + i ? 'on' : ''}" data-av="e${i}" aria-label="Avatar ${i + 1}">${AV.face(i)}</button>`);
@@ -2110,11 +2228,13 @@
     const keep = same ? [...el.querySelectorAll('input[id]:not([type=checkbox]):not([type=range]):not([type=file])')].map(i => [i.id, i.value]) : [];
     const focus = same && el.contains(document.activeElement) && document.activeElement.id;
     const scroll = same && el.querySelector('.modal') ? el.querySelector('.modal').scrollTop : 0;
-    const pwOpen = same && el.querySelector('details.pw[open]');
+    const pwOpen = same && el.querySelector('details.pw:not(.admin)[open]');
+    const admOpen = same && el.querySelector('details.admin[open]');
     el.dataset.modal = String(modal);
     el.innerHTML = `<div class="modal">${html}</div>`;
     for (const [id, v] of keep) { const i = el.querySelector('#' + id); if (i && v) i.value = v; }
-    if (pwOpen) { const d = el.querySelector('details.pw'); if (d) d.open = true; }
+    if (pwOpen) { const d = el.querySelector('details.pw:not(.admin)'); if (d) d.open = true; }
+    if (admOpen) { const d = el.querySelector('details.admin'); if (d) d.open = true; }
     if (scroll) el.querySelector('.modal').scrollTop = scroll;
     bindAccountModal(el, !!focus);
     if (focus) { const f = el.querySelector('#' + focus); if (f) f.focus(); }

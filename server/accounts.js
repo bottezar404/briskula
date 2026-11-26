@@ -10,6 +10,7 @@
 const crypto = require('crypto');
 
 const UNAME_RE = /^[\p{L}\p{N}_.-]{3,20}$/u;
+const HIST_MAX = 20;
 const PASS_MIN = 6, PASS_MAX = 100, FRIENDS_MAX = 200;
 const DM_KEEP = 200, LOBBY_KEEP = 100;
 // žetoni za poker: svaki račun počinje s WALLET_START; partija pokera košta ulog (žetoni za stolom),
@@ -95,8 +96,43 @@ function create(store) {
       if (!checkPass(String(oldPass || ''), u.pass)) return { error: 'Stara lozinka nije točna.' };
       newPass = String(newPass || '');
       if (newPass.length < PASS_MIN || newPass.length > PASS_MAX) return { error: `Nova lozinka mora imati barem ${PASS_MIN} znakova.` };
-      u.pass = hashPass(newPass); save(u);
+      u.pass = hashPass(newPass); delete u.tempPass; save(u);
       return {};
+    },
+
+    /** admin: nova privremena lozinka za korisnika (sve njegove prijave se odjave) */
+    resetPass(u) {
+      const A = 'abcdefghjkmnpqrstuvwxyz23456789';
+      const temp = Array.from({ length: 8 }, () => A[crypto.randomInt(A.length)]).join('');
+      u.pass = hashPass(temp); u.tempPass = true; save(u);
+      for (const [k, d] of store.docs) if (k.startsWith('sess:') && d.uid === u.id) store.del(k);
+      return temp;
+    },
+
+    // ---------- povijest partija (zadnjih HIST_MAX po igraču) ----------
+    saveGame(doc, uids) {
+      store.put('game:' + doc.id, Object.assign(doc, { uids }));
+      for (const uid of new Set(uids.filter(Boolean))) {
+        const u = user(uid);
+        if (!u) continue;
+        u.hist = [doc.id].concat(u.hist || []);
+        const drop = u.hist.slice(HIST_MAX);
+        u.hist = u.hist.slice(0, HIST_MAX);
+        save(u);
+        // stari zapis se briše kad ga više nitko nema u povijesti
+        for (const id of drop) {
+          const gd = store.get('game:' + id);
+          if (!gd || !(gd.uids || []).some(x => { const o = user(x); return o && (o.hist || []).includes(id); })) store.del('game:' + id);
+        }
+      }
+    },
+    game: id => typeof id === 'string' && /^[a-z0-9]{4,20}$/.test(id) ? store.get('game:' + id) || null : null,
+    /** kratki popis partija za prikaz */
+    history(u) {
+      return (u.hist || []).map(id => store.get('game:' + id)).filter(Boolean).map(d => {
+        const me = d.uids.indexOf(u.id);
+        return { id: d.id, t: d.t, kind: d.kind, low: d.low, mode: d.mode, tour: d.tour, players: d.players.map(p => p.name), me, res: d.result.draw ? 'd' : d.result.winners.includes(me) ? 'w' : 'l', forfeit: d.result.forfeit };
+      });
     },
 
     /** profil (već provjeren u serveru): name, av ('eN' ili 'img'), img (data URL), cm */

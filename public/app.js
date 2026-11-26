@@ -1621,6 +1621,31 @@
   function kvPickers(r, g, i) {
     return g.players.map((pl, p) => pl.ans && pl.ans.c === i ? avatar(Object.assign({}, r.seats[p] || { name: pl.name }, { cm: 0 }), 'xs') : '').join('');
   }
+  // zamijeni sadržaj elementa novim HTML-om, ali element koji odgovara `keep` (i njegove roditelje)
+  // ostavi na mjestu: mijenja se samo ono što se stvarno promijenilo
+  function patchHtml(root, html, keep) {
+    const tmp = document.createElement(root.tagName);
+    tmp.innerHTML = html;
+    const sync = (o, n) => {
+      const oc = [...o.childNodes], nc = [...n.childNodes];
+      if (oc.length !== nc.length) {
+        const k = o.querySelector(keep), nk = n.querySelector(keep);
+        if (k && nk) nk.replaceWith(k); // druga struktura: čuvani element se samo premjesti
+        o.replaceChildren(...nc);
+        return;
+      }
+      oc.forEach((c, i) => {
+        const d = nc[i];
+        if (c.nodeType === 1 && d.nodeType === 1 && c.tagName === d.tagName && (c.matches(keep) || c.querySelector(keep)) && (d.matches(keep) || d.querySelector(keep))) {
+          if (c.matches(keep)) return; // ostaje isti (tekst i fokus ostaju)
+          for (const a of [...c.attributes]) if (!d.hasAttribute(a.name)) c.removeAttribute(a.name);
+          for (const a of [...d.attributes]) if (c.getAttribute(a.name) !== a.value) c.setAttribute(a.name, a.value);
+          sync(c, d);
+        } else if (!c.isEqualNode(d)) c.replaceWith(d);
+      });
+    };
+    sync(root, tmp);
+  }
   function renderKviz() {
     const r = room, g = r.game, me = g.you, now = Date.now();
     const { bubbles, sysMsg } = gameBubbles(r, now);
@@ -1634,7 +1659,7 @@
     const isW = g.q && g.q.type === 'w';
     // upisani tekst i fokus ostaju kad se ekran iscrta ponovno (npr. netko drugi odgovori)
     const inEl = document.getElementById('kvIn');
-    const keepIn = inEl && inEl.dataset.q === String(g.trickNo) ? { v: inEl.value, f: document.activeElement === inEl, s: inEl.selectionStart } : null;
+    const keepIn = inEl && inEl.dataset.q === String(g.trickNo) && !inEl.disabled ? { el: inEl, v: inEl.value, f: document.activeElement === inEl, s: inEl.selectionStart } : null;
     const plate = p => {
       const pl = g.players[p], seat = r.seats[p] || { name: pl.name };
       const off = seat && !seat.bot && seat.connected === false;
@@ -1718,7 +1743,7 @@
     // skupljeni bodovi na računu (stalne sobe; gost nema)
     const myTot = r.kvRoom && r.seats[me] && r.seats[me].kvPts != null ? r.seats[me].kvPts : null;
     const sigs = g.phase === 'over' ? '' : `<div class="signals">${['👍', '😂', '😮', '🤓', '😤', '🙈'].map(t => `<button class="ghost" data-sig="${t}">${t}</button>`).join('')}</div>`;
-    $app.innerHTML = `
+    const html = `
       <div class="topbar">
         <button class="ghost small" id="leave">←</button>
         <div class="mid">${r.kvRoom ? `${esc(r.roomIcon || '')} ${esc(r.roomName || 'Kviz')} · 👥 ${g.mode}${myTot != null ? ` · <span class="kv-tot" title="Tvoji skupljeni bodovi na računu">⭐ ${kvPts(myTot)}</span>` : ''}` : `Kviz · ${modeName('kviz', g.mode, true)}${r.code ? ' · ' + esc(r.code) : ' · ' + LEVEL_NAMES[r.level]}${tally}`}</div>
@@ -1730,6 +1755,9 @@
         <div class="kv-pls n${Math.min(g.mode, 5)}">${(g.mode > 4 ? order.slice().sort((a, b) => g.players[b].score - g.players[a].score) : order).map(plate).join('')}</div>
         ${sigs}
       </div>`;
+    // polje za upis ostaje isti element dok traje pitanje: kad bi se zamijenio (npr. netko drugi
+    // odgovori ili pošalje emoji), mobitel bi zatvorio tipkovnicu i ne bi se moglo pisati
+    if (keepIn) patchHtml($app, html, '#kvForm'); else $app.innerHTML = html;
     $app.querySelector('#leave').onclick = () => { if (g.phase === 'over' || r.kvRoom || confirmLeave()) leave(); };
     $app.querySelector('#menuBtn').onclick = () => { modal = 'settings'; render(); };
     bindChatBtn();
@@ -1738,7 +1766,7 @@
     if (kf) {
       const ki = kf.querySelector('#kvIn');
       kf.onsubmit = e => { e.preventDefault(); kvAnswerText(ki.value); };
-      if (keepIn) { ki.value = keepIn.v; if (keepIn.f) { ki.focus(); try { ki.setSelectionRange(keepIn.s, keepIn.s); } catch { } } }
+      if (keepIn && ki !== keepIn.el) { ki.value = keepIn.v; if (keepIn.f) { ki.focus(); try { ki.setSelectionRange(keepIn.s, keepIn.s); } catch { } } }
       else if (canAns && !modal && !chat.open && window.matchMedia('(hover: hover)').matches) ki.focus(); // na računalu odmah piši
     }
     $app.querySelectorAll('[data-sig]').forEach(b => b.onclick = () => {

@@ -633,3 +633,37 @@ details.pw summary { cursor: pointer; padding: 6px 0; color: var(--gold); font-w
   .side-f.open .sf-tab { display: none; }
   .side-f.open .sf-back { display: block; position: fixed; inset: 0; z-index: 46; background: rgba(0,0,0,.45); animation: fade .2s; }
 }
+
+/* ---------- preklapanja: popravci ---------- */
+/* naslov u gornjoj traci u jednom redu (na mobitelu se lomio u 2–3 reda i gurao stol) */
+.topbar .mid { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* mjehurić igrača gore ide ispod oznake s cm, da je ne prekrije */
+.seat.top .avw:has(.cml) .av .bubble { top: calc(100% + 22px); }
+@media (min-width: 900px) and (min-height: 520px) { .seat.top .avw:has(.cml) .av .bubble { top: calc(100% + 30px); } }
+/* moj mjehurić ide udesno od avatara, da ne izađe preko lijevog ruba ekrana */
+.pl-me .av .bubble { left: -6px; translate: none; transform-origin: 12px 100%; }
+.pl-me .av .bubble::after { left: 24px; }
+/* prsten timera ne smije ući u karte igrača gore */
+.seat.top > .pl { margin-top: 4px; }
+@media (max-width: 899px) { .mode2 .seat.top > .pl, .mode3 .seat.top > .pl { margin-top: 10px; } }
+@media (min-width: 900px) and (min-height: 520px) {
+  /* poker na PC-u: status iznad mojeg uloga, a ne preko njega */
+  .table.poker .status { bottom: 44px; }
+  /* poker u četvero: bočni igrači niže, da im ime ne ide ispod karata igrača gore */
+  .mode4.poker .seat.left, .mode4.poker .seat.right { top: 44%; }
+}
+/* mobitel: jezičak online prijatelja uži, da ne prekriva gumbe i tekst izbornika */
+@media (max-width: 899px), (max-height: 519px) {
+  .sf-tab { flex-direction: column; gap: 0; padding: 8px 3px 8px 4px; font-size: 15px; line-height: 1.1; top: calc(50% - 30px); }
+  .sf-tab .on-n { margin-left: 0; font-size: 12px; }
+  .sf-tab .badge { top: -8px; right: auto; left: -8px; }
+}
+/* poziv i obavijest o poruci u isto vrijeme: druga ide ispod prve */
+#invite:not([hidden]) ~ #dmNote:not([hidden]), #dmNote:not([hidden]) ~ #invite:not([hidden]) { top: calc(92px + env(safe-area-inset-top)); }
+/* mobitel: status uvijek u jednom redu; kad se prelomio u 2 reda (online, dugo ime + timer) išao je preko špila i rezultata */
+@media (max-width: 899px) { .status { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 6px; font-size: 14px; } .deck, .has-left .deck { bottom: 30px; } }
+/* mobitel, poker u četvero: igrač gore zauzme cijelu širinu, pa bočni igrači i stol idu malo niže */
+@media (max-width: 899px) {
+  .mode4.poker .seat.left, .mode4.poker .seat.right { top: calc(var(--sw) * 1.6 + 62px); }
+  .mode4.poker .pboard { top: 61%; }
+}

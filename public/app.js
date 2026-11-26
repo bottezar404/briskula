@@ -1831,7 +1831,7 @@
     let body = '<p class="muted">Učitavanje…</p>';
     if (t) {
       body = t.top.length ? `<ol class="kv-board">${t.top.map(row).join('')}${t.me && t.me.rank > t.top.length ? `<li class="gap">…</li>${row(t.me)}` : ''}</ol>` : '<p class="muted">Još nitko nema bodova. Budi prvi/a!</p>';
-      body += `<p class="muted kv-tnote">${t.guest ? 'Prijavi se da ti se bodovi iz kvizova skupljaju na računu.' : acc.user && acc.user.kviz ? `Tvoji bodovi: <b>${kvPts(kvTopCat ? ((acc.user.kviz.cats || {})[kvTopCat] || {}).pts : acc.user.kviz.pts)}</b> · ulazi i izlazi iz soba, bodovi ostaju.` : ''}</p>`;
+      body += `<p class="muted kv-tnote">${t.guest ? 'Imena na ljestvici vide samo prijavljeni. Prijavi se da vidiš tko je gdje i da ti se bodovi iz kvizova skupljaju na računu.' : acc.user && acc.user.kviz ? `Tvoji bodovi: <b>${kvPts(kvTopCat ? ((acc.user.kviz.cats || {})[kvTopCat] || {}).pts : acc.user.kviz.pts)}</b> · ulazi i izlazi iz soba, bodovi ostaju.` : ''}</p>`;
     }
     return `<div class="kv-th">🏆 Ljestvica bodova${kvTopCat ? ' · ' + esc(KV.catOf(kvTopCat).name) : ''}</div>${tabs}${body}`;
   }

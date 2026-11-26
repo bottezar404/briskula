@@ -574,7 +574,9 @@ function kvTopMsg(c, cat) {
   cat = KV.CATS.some(x => x.id === cat) ? cat : null;
   const me = c && c.uid && ACC.user(c.uid);
   const t = ACC.kvizTop(10, cat, me);
-  const row = x => ({ uname: x.u.uname, name: x.u.name || x.u.uname, av: x.u.av === 'img' && x.u.img ? 'i:' + storeImg(x.u.img) : x.u.av || AV.forName(x.u.name || x.u.uname), cm: x.u.cm || 0, pts: x.pts, rank: x.rank, me: !!me && x.u.id === me.id });
+  // gosti ne vide tko je na ljestvici: umjesto imena i avatara "Igrač 1", "Igrač 2"...
+  const row = x => !me ? { uname: '', name: 'Igrač ' + x.rank, av: AV.forName('Igrač ' + x.rank), cm: 0, pts: x.pts, rank: x.rank, me: false }
+    : { uname: x.u.uname, name: x.u.name || x.u.uname, av: x.u.av === 'img' && x.u.img ? 'i:' + storeImg(x.u.img) : x.u.av || AV.forName(x.u.name || x.u.uname), cm: x.u.cm || 0, pts: x.pts, rank: x.rank, me: x.u.id === me.id };
   const top = t.top.map(row);
   return { type: 'kvTop', cat, top, me: t.me ? row(t.me) : null, players: t.players, guest: !me, imgs: newImgs(c, top.map(x => x.av)) };
 }

@@ -608,6 +608,7 @@
         ${installEvt ? '<button class="small" id="install">Instaliraj aplikaciju</button>' : ''}
       </div>
       ${isIOS ? '<p class="muted" style="text-align:center">Na iPhoneu: Podijeli → „Dodaj na početni zaslon” za aplikaciju.</p>' : ''}
+      ${verLine()}
     </div>`;
     const nameEl = $app.querySelector('#name');
     nameEl.oninput = () => { S.name = nameEl.value.trim(); save(); };
@@ -632,6 +633,7 @@
     }
     $app.querySelector('#rules').onclick = () => { modal = 'rules'; render(); };
     $app.querySelector('#settings').onclick = () => { modal = 'settings'; render(); };
+    bindNotes($app);
     bindAccountRow();
     const ib = $app.querySelector('#install');
     if (ib) ib.onclick = async () => { installEvt.prompt(); await installEvt.userChoice; installEvt = null; render(); };
@@ -1435,6 +1437,21 @@
     el.querySelectorAll('[data-fmsg]').forEach(b => b.onclick = () => openDm(+b.dataset.fmsg));
   }
 
+  // broj verzije + "Što je novo" (public/version.js)
+  const VER = window.BRK_VER || { VERSION: '', NOTES: [] };
+  function verLine() {
+    return VER.VERSION ? `<p class="ver"><button class="linkish" id="notesBtn">v${VER.VERSION} · Što je novo</button></p>` : '';
+  }
+  function bindNotes(root) {
+    const b = root.querySelector('#notesBtn'); if (b) b.onclick = () => { modal = 'notes'; render(); };
+  }
+  function notesHtml() {
+    const dt = d => { const [y, m, dd] = d.split('-'); return `${+dd}. ${+m}. ${y}.`; };
+    return `<h2>Što je novo</h2>
+      <ul class="notes">${VER.NOTES.map(n => `<li><b>v${n.v}</b> <span class="muted">${dt(n.d)}</span><div>${esc(n.t)}</div></li>`).join('')}</ul>
+      <button id="close" style="width:100%">Zatvori</button>`;
+  }
+
   function renderModal() {
     let el = document.getElementById('overlay');
     let html = '';
@@ -1445,7 +1462,9 @@
       <label class="chk"><input type="checkbox" id="sp" ${S.showPoints ? 'checked' : ''}> Prikaži bodove tijekom igre (protiv botova)</label>
       <label class="chk"><input type="checkbox" id="scm" ${S.showCm ? 'checked' : ''}> Prikaži dužinu pišulinca ispod avatara</label>
       <label class="chk"><input type="checkbox" id="snd" ${S.sound ? 'checked' : ''}> Zvukovi</label>
-      <div class="row" style="margin-top:12px"><button class="ghost" id="rulesB">Pravila</button><button id="close">Zatvori</button></div>`;
+      <div class="row" style="margin-top:12px"><button class="ghost" id="rulesB">Pravila</button><button id="close">Zatvori</button></div>
+      ${verLine()}`;
+    else if (modal === 'notes') html = notesHtml();
     else if (modal === 'account') html = accountHtml();
     else if (modal === 'stats') html = statsHtml();
     else if (modal === 'friends') html = friendsHtml();
@@ -1484,6 +1503,7 @@
     const scm = el.querySelector('#scm'); if (scm) scm.onchange = () => { S.showCm = scm.checked; save(); render(); };
     const snd = el.querySelector('#snd'); if (snd) snd.onchange = () => { S.sound = snd.checked; save(); };
     const rb = el.querySelector('#rulesB'); if (rb) rb.onclick = () => { modal = 'rules'; render(); };
+    bindNotes(el);
     el.querySelectorAll('[data-av]').forEach(b => b.onclick = () => { S.avatar = b.dataset.av; save(); render(); });
     const avFile = el.querySelector('#avFile');
     if (avFile) avFile.onchange = async () => {

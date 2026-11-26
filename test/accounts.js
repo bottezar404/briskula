@@ -97,6 +97,14 @@ const uniq = 'u' + Date.now().toString(36).slice(-6);
   b.send({ type: 'friendAccept', id: inB.friends[0].id });
   const okA = await a.until(m => m.type === 'account' && m.friends[0] && m.friends[0].status === 'ok' && m.friends[0].at);
   assert.strictEqual(okA.friends[0].at.where, 'menu');
+  assert.deepStrictEqual(okA.friends[0].st, { w: 0, p: 0, t: 0 }, 'u popisu prijatelja je kratka statistika');
+  // profil drugog igrača (statistika)
+  a.send({ type: 'userInfo', uname: 'bruno_' + uniq });
+  const pi = (await a.until(m => m.type === 'userInfo')).user;
+  assert.strictEqual(pi.uname, 'bruno_' + uniq); assert.strictEqual(pi.friend, 'ok'); assert(pi.stats && pi.st && !pi.me);
+  assert(!('pass' in pi) && !('friends' in pi), 'profil ne otkriva lozinku ni prijatelje');
+  a.send({ type: 'userInfo', uname: 'nema_takvog_' + uniq });
+  await a.until(m => m.type === 'error' && /Nema tog/.test(m.msg));
   console.log('prijatelji ok');
 
   // Bruno napravi sobu → Ana vidi da je u sobi; poziv stiže Ani

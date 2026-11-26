@@ -589,3 +589,47 @@ details.pw summary { cursor: pointer; padding: 6px 0; color: var(--gold); font-w
 @media (max-width: 899px), (max-height: 519px) {
   .chat.dm { height: min(78vh, 600px); height: min(78dvh, 600px); }
 }
+
+/* ---------- bočna ploča: online prijatelji na početnom ekranu ---------- */
+.side-f[hidden] { display: none; }
+.sf-panel { display: flex; flex-direction: column; gap: 8px; background: #173f2a; border: 1px solid rgba(229,199,122,.4); box-shadow: 0 6px 30px rgba(0,0,0,.45); padding: 12px; }
+.sf-head { display: flex; align-items: center; gap: 6px; padding-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,.1); }
+.sf-head b { color: var(--gold); font-size: 16px; }
+.sf-head #sfClose { margin-left: auto; }
+.sf-list { list-style: none; margin: 0; padding: 0; overflow-y: auto; min-height: 0; flex: 1 1 auto; display: flex; flex-direction: column; gap: 6px;
+  scrollbar-width: thin; scrollbar-color: rgba(229,199,122,.35) transparent; overscroll-behavior: contain; }
+.sf-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px; background: rgba(0,0,0,.2); border-radius: 10px; }
+.sf-list li .n { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.sf-list li .n b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sf-list li .sub { font-size: 12px; color: #8be0a6; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sf-list li.busy .sub { color: var(--gold); }
+.sf-btns { display: flex; gap: 6px; flex: 1 0 100%; justify-content: flex-end; }
+.sf-btns button { padding: 7px 10px; }
+.sf-btns .msg-btn { position: relative; margin-right: auto; }
+.sf-btns .badge, .sf-tab .badge { position: absolute; top: -6px; right: -4px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--red); color: #fff; font-size: 11px; font-weight: 800; line-height: 18px; text-align: center; box-shadow: 0 0 0 2px var(--felt2); }
+.sf-empty { text-align: center; margin: 8px 0; }
+.sf-note { font-size: 12px; margin: 0; }
+.sf-all { width: 100%; }
+.sf-tab { position: relative; display: none; }
+.sf-back { display: none; }
+@media (prefers-color-scheme: dark) { .sf-panel { background: #102e1f; } }
+
+/* PC: stalni stupac s desne strane, izbornik se pomakne ulijevo */
+@media (min-width: 900px) and (min-height: 520px) {
+  .sf-panel { position: fixed; z-index: 30; top: 14px; right: 14px; width: 290px; max-height: calc(100vh - 28px); border-radius: 16px; animation: fade .2s; }
+  .sf-head #sfClose { display: none; }
+  body.side-f #app { padding-right: 310px; }
+  body.side-f #toast { left: calc(50% - 155px); }
+}
+/* mobitel: jezičak uz desni rub, ladica se otvara na dodir */
+@media (max-width: 899px), (max-height: 519px) {
+  .sf-tab { display: flex; align-items: center; gap: 2px; position: fixed; z-index: 45; right: 0; top: calc(50% - 26px); padding: 10px 8px 10px 10px;
+    border-radius: 14px 0 0 14px; background: #173f2a; color: var(--cream); border: 1px solid rgba(229,199,122,.5); border-right: 0; box-shadow: -3px 3px 14px rgba(0,0,0,.4); font-size: 20px; }
+  .sf-tab .on-n { margin-left: 2px; }
+  .sf-panel { position: fixed; z-index: 47; top: 0; bottom: 0; right: 0; width: min(330px, 88vw); border-radius: 16px 0 0 16px; border-right: 0;
+    padding-top: calc(12px + env(safe-area-inset-top)); padding-bottom: calc(12px + env(safe-area-inset-bottom));
+    transform: translateX(105%); transition: transform .22s ease; }
+  .side-f.open .sf-panel { transform: none; }
+  .side-f.open .sf-tab { display: none; }
+  .side-f.open .sf-back { display: block; position: fixed; inset: 0; z-index: 46; background: rgba(0,0,0,.45); animation: fade .2s; }
+}

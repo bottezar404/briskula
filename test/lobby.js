@@ -1,4 +1,4 @@
-// Grupni chat za sve online: gosti čitaju, prijavljeni pišu, povijest se čuva, limiti, poziv u sobu, brisanje.
+// Grupni chat za sve online: samo prijavljeni (gosti ga ne vide), povijest se čuva, limiti, poziv u sobu, brisanje.
 // Pokreni: node test/lobby.js
 'use strict';
 process.env.PORT = 0; process.env.BRK_PACE_SCALE = '0.01';
@@ -37,11 +37,11 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
   // svi se pretplate; dobiju povijest i tko je online (prijavljeni + broj gostiju)
   for (const c of [a, b, g, adm]) c.send({ type: 'lobbyOpen' });
   const la = await a.until(m => m.type === 'lobby');
-  const lg = await g.until(m => m.type === 'lobby');
+  await g.until(m => m.type === 'lobbyDenied', 'gost ne dobije grupni chat');
   await b.until(m => m.type === 'lobby'); await adm.until(m => m.type === 'lobby');
   assert.ok(Array.isArray(la.msgs));
   assert.ok(la.who.includes(idA) && la.who.includes(idB), 'prijavljeni su na popisu');
-  assert.ok(lg.guests >= 1, 'gost se broji');
+  assert.ok(la.guests >= 1, 'gost se broji');
   assert.strictEqual(la.users[idA].uname, 'ana_' + uniq);
   assert.strictEqual(adm.acc.user.lobbyAdmin, true); assert.strictEqual(a.acc.user.lobbyAdmin, false);
   console.log('povijest i tko je online ok');
@@ -54,7 +54,7 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
   a.send({ type: 'lobbySend', text: '  Tko   igra \u0007briškulu? ' });
   const ma = await a.until(m => m.type === 'lobbyMsg');
   const mb = await b.until(m => m.type === 'lobbyMsg');
-  const mg = await g.until(m => m.type === 'lobbyMsg');
+  const mg = await adm.until(m => m.type === 'lobbyMsg');
   assert.strictEqual(mb.msg.t, 'Tko igra briškulu?');
   assert.strictEqual(mg.msg.f, idA);
   assert.strictEqual(mg.users[idA].name, 'Ana');
@@ -79,12 +79,13 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
   b.send({ type: 'create', mode: 2, kind: 'briskula' });
   const room = await b.until(m => m.type === 'room');
   b.send({ type: 'lobbySend', text: 'Treba mi jedan za briškulu', code: room.code });
-  const inv = await g.until(m => m.type === 'lobbyMsg' && m.msg.code);
+  const inv = await adm.until(m => m.type === 'lobbyMsg' && m.msg.code);
   assert.strictEqual(inv.msg.code, room.code);
   console.log('poziv u sobu ok');
 
   // nova veza (npr. osvježavanje): povijest je tu
   const late = client(port, 'Kasni'); await late.open;
+  await reg(late, 'kasni_' + uniq);
   late.send({ type: 'lobbyOpen' });
   const ll = await late.until(m => m.type === 'lobby');
   assert.ok(ll.msgs.some(x => x.t === 'Tko igra briškulu?'));
@@ -96,13 +97,25 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
   await wait(200);
   assert.ok(!a.msgs.some(m => m.type === 'lobbyDel'));
   a.send({ type: 'lobbyDel', id: ma.msg.id });
-  assert.strictEqual((await g.until(m => m.type === 'lobbyDel')).id, ma.msg.id);
+  assert.strictEqual((await b.until(m => m.type === 'lobbyDel')).id, ma.msg.id);
   adm.send({ type: 'lobbyDel', id: inv.msg.id });
-  assert.strictEqual((await g.until(m => m.type === 'lobbyDel')).id, inv.msg.id);
+  assert.strictEqual((await b.until(m => m.type === 'lobbyDel')).id, inv.msg.id);
   late.send({ type: 'lobbyOpen' });
   const l2 = await late.until(m => m.type === 'lobby');
   assert.ok(!l2.msgs.some(x => x.id === ma.msg.id || x.id === inv.msg.id));
   console.log('brisanje ok');
+
+  // gost nije dobio ništa iz grupnog chata
+  assert.ok(!g.msgs.some(m => /^lobby(?!Denied)/.test(m.type)), 'gost ne vidi poruke ni tko je online');
+  // nakon odjave više ne stižu poruke
+  adm.send({ type: 'logout' }); await adm.until(m => m.type === 'account' && !m.user);
+  const nAdm = adm.msgs.length;
+  await wait(1600);
+  late.send({ type: 'lobbySend', text: 'jel me itko čuje' });
+  await a.until(m => m.type === 'lobbyMsg' && m.msg.t === 'jel me itko čuje');
+  await wait(200);
+  assert.ok(!adm.msgs.slice(nAdm).some(m => m.type === 'lobbyMsg'), 'odjavljeni ne dobiva poruke');
+  console.log('samo prijavljeni ok');
 
   // odjava/odlazak: popis online se osvježi
   b.ws.close();

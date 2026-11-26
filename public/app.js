@@ -115,7 +115,9 @@
       profSent = JSON.stringify(profileMsg());
       save();
     }
-    if (m.user) lobbySub(); // prijavljeni odmah vide nove poruke u grupnom chatu (brojka na gumbu)
+    // grupni chat je samo za prijavljene: nakon prijave (i svake nove veze) pretplata, nakon odjave sve se briše
+    if (m.user && (!lobby.sub || 'img' in m.user)) { lobby.sub = false; lobbySub(); }
+    else if (!m.user) lobbyReset();
     if (!was && m.user && modal === 'account') modal = null;
     // prijava s privremenom lozinkom (admin reset): odmah ponudi promjenu
     if (!was && m.user && m.user.tempPass) { modal = 'account'; acc.err = ''; }
@@ -327,7 +329,7 @@
       };
       ws.onmessage = e => {
         const m = JSON.parse(e.data);
-        if (m.type === 'welcome') { this.token = m.token; store.set('token', m.token); if (lobby.sub && this.retried) this.send({ type: 'lobbyOpen' }); this.retried = true; }
+        if (m.type === 'welcome') { this.token = m.token; store.set('token', m.token); }
         else if (m.type === 'room') { if (m.imgs) Object.assign(imgCache, m.imgs); if (ctrl === this) onRoom(m); }
         else if (m.type === 'left') { if (ctrl === this) { room = null; chat.open = false; render(); } }
         else if (m.type === 'error') toast(m.msg);
@@ -342,6 +344,7 @@
         else if (m.type === 'kvList') { kvRooms = m.rooms || []; kvListPaint(); }
         else if (m.type === 'kvTop') { if (m.imgs) Object.assign(imgCache, m.imgs); kvTop = m; kvTopPaint(); }
         else if (m.type === 'dm' || m.type === 'dmMsg' || m.type === 'dmSeen' || m.type === 'dmRead') onDm(m);
+        else if (m.type === 'lobbyDenied') { lobbyReset(); render(); }
         else if (m.type === 'lobby' || m.type === 'lobbyMsg' || m.type === 'lobbyDel' || m.type === 'lobbyWho') onLobby(m);
       };
       ws.onclose = () => { this.ok = false; if (ctrl === this && room) render(); this.later(); };
@@ -582,10 +585,11 @@
   // čitati mogu i gosti, pisati prijavljeni; klik na ime: dodaj za prijatelja / poruka / pozovi
   const LOBBY_MAX = 200;
   const lobby = { open: false, sub: false, loaded: false, msgs: [], users: {}, who: [], guests: 0, read: +store.get('lobbyRead', 0) || 0, view: 'chat', pick: null, el: null, key: '', fkey: '' };
-  const lobbyShown = () => lobby.open && !window.BRK_OFFLINE && (!room || !room.game);
+  const lobbyShown = () => lobby.open && loggedIn() && !window.BRK_OFFLINE && (!room || !room.game);
+  function lobbyReset() { lobby.sub = false; lobby.open = false; lobby.loaded = false; lobby.msgs = []; lobby.who = []; lobby.users = {}; lobby.pick = null; lobby.key = ''; }
   const lobbyUser = id => lobby.users[id] || { id, name: 'Igrač', uname: '', av: 'e0', cm: 0 };
   function lobbySub() {
-    if (window.BRK_OFFLINE || lobby.sub) return;
+    if (window.BRK_OFFLINE || lobby.sub || !loggedIn()) return;
     lobby.sub = true; getNet().send({ type: 'lobbyOpen' });
   }
   function lobbyUnread() {
@@ -635,7 +639,6 @@
     const on = lobby.who.includes(u.id);
     let btns = '';
     if (me) btns = '<span class="muted">To si ti.</span>';
-    else if (!loggedIn()) btns = '<button class="small" data-lc="login">Prijavi se da dodaš prijatelja</button>';
     else if (!f) btns = `<button class="small" data-lc="add">+ Dodaj za prijatelja</button>`;
     else if (f.status === 'out') btns = '<span class="muted">Zahtjev za prijateljstvo je poslan.</span>';
     else if (f.status === 'in') btns = `<button class="small" data-lc="accept">Prihvati prijateljstvo</button>`;
@@ -654,7 +657,6 @@
     const u = lobbyUser(lobby.pick);
     switch (a) {
       case 'unpick': lobby.pick = null; break;
-      case 'login': lobby.open = false; modal = 'account'; break;
       case 'add': net.send({ type: 'friendAdd', uname: u.uname }); lobby.pick = null; break;
       case 'accept': net.send({ type: 'friendAccept', id: u.id }); lobby.pick = null; break;
       case 'dm': lobby.open = false; lobby.pick = null; openDm(u.id); return;
@@ -692,8 +694,7 @@
           <input id="lcIn" maxlength="${LOBBY_MAX}" placeholder="Poruka za sve…" enterkeyhint="send">
           <button type="button" class="ghost" data-lc="room" id="lcRoom" title="Pozovi sve u svoju sobu" aria-label="Pozovi sve u svoju sobu">📣</button>
           <button type="submit">Pošalji</button>
-        </form>
-        <div class="lc-guest" id="lcGuest"><span class="muted">Čitati mogu svi, a za pisanje se treba prijaviti.</span><button class="small" data-lc="login">Prijava</button></div>`;
+        </form>`;
       document.body.appendChild(el);
       el.onclick = e => {
         const b = e.target.closest('[data-lc],[data-lu]'); if (!b) return;
@@ -712,8 +713,6 @@
     const el = lobby.el;
     el.hidden = false;
     const me = acc.user ? acc.user.id : 0, admin = !!(acc.user && acc.user.lobbyAdmin);
-    el.querySelector('#lcForm').hidden = !loggedIn();
-    el.querySelector('#lcGuest').hidden = loggedIn();
     el.querySelector('#lcRoom').hidden = !lobbyRoom();
     el.querySelector('#lcWho').classList.toggle('on', lobby.view === 'who');
     el.querySelector('#lcPick').innerHTML = lobby.pick ? lobbyPickHtml() : '';
@@ -745,7 +744,7 @@
     if (atBottom || (lobby.msgs.length && lobby.msgs[lobby.msgs.length - 1].f === me)) list.scrollTop = list.scrollHeight;
   }
   function lobbyBtn(id, cls) {
-    if (window.BRK_OFFLINE) return '';
+    if (window.BRK_OFFLINE || !loggedIn()) return ''; // gosti ne vide grupni chat
     return `<button class="${cls || 'ghost small'} lobby-btn" id="${id}">💬 Grupni chat <span class="muted lb-n" data-lobbyn>${lobbyOnText()}</span><span data-lobbyb>${lobbyBadge()}</span></button>`;
   }
 
@@ -1832,7 +1831,7 @@
     let body = '<p class="muted">Učitavanje…</p>';
     if (t) {
       body = t.top.length ? `<ol class="kv-board">${t.top.map(row).join('')}${t.me && t.me.rank > t.top.length ? `<li class="gap">…</li>${row(t.me)}` : ''}</ol>` : '<p class="muted">Još nitko nema bodova. Budi prvi/a!</p>';
-      body += `<p class="muted kv-tnote">${t.guest ? 'Prijavi se da ti se bodovi iz kvizova skupljaju na računu.' : acc.user && acc.user.kviz ? `Tvoji bodovi: <b>${kvPts(kvTopCat ? ((acc.user.kviz.cats || {})[kvTopCat] || {}).pts : acc.user.kviz.pts)}</b> · ulazi i izlazi iz soba, bodovi ostaju.` : ''}</p>`;
+      body += `<p class="muted kv-tnote">${t.guest ? 'Imena na ljestvici vide samo prijavljeni. Prijavi se da vidiš tko je gdje i da ti se bodovi iz kvizova skupljaju na računu.' : acc.user && acc.user.kviz ? `Tvoji bodovi: <b>${kvPts(kvTopCat ? ((acc.user.kviz.cats || {})[kvTopCat] || {}).pts : acc.user.kviz.pts)}</b> · ulazi i izlazi iz soba, bodovi ostaju.` : ''}</p>`;
     }
     return `<div class="kv-th">🏆 Ljestvica bodova${kvTopCat ? ' · ' + esc(KV.catOf(kvTopCat).name) : ''}</div>${tabs}${body}`;
   }
@@ -2305,7 +2304,7 @@
       };
     }
     const lo = el.querySelector('#logout');
-    if (lo) lo.onclick = () => { net && net.send({ type: 'logout' }); store.set('auth', null); acc.user = null; acc.friends = []; dm.with = null; dm.conv = {}; modal = null; render(); toast('Odjavljen/a si.'); };
+    if (lo) lo.onclick = () => { net && net.send({ type: 'logout' }); store.set('auth', null); acc.user = null; acc.friends = []; dm.with = null; dm.conv = {}; lobbyReset(); modal = null; render(); toast('Odjavljen/a si.'); };
     const pw = el.querySelector('#pwForm');
     if (pw) pw.onsubmit = e => { e.preventDefault(); acc.err = ''; net.send({ type: 'password', old: el.querySelector('#pwOld').value, pass: el.querySelector('#pwNew').value }); pw.reset(); };
     const ta = el.querySelector('#toAcc'); if (ta) ta.onclick = () => { modal = 'account'; render(); };

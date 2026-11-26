@@ -275,6 +275,10 @@ function client(port, name, auto) {
   d.send({ type: 'kvTop', cat: 'hrv' });
   const T2 = await topCat;
   assert.strictEqual(T2.cat, 'hrv'); assert.strictEqual(T2.guest, true); assert.strictEqual(T2.me, null);
+  // gost ne vidi imena ni avatare na ljestvici, samo "Igrač 1", "Igrač 2"...
+  if (myPts) assert(T2.top.length > 0, 'ljestvica nije prazna');
+  assert(T2.top.every(x => !x.uname && x.name === 'Igrač ' + x.rank && !x.av.startsWith('i:')), 'gost vidi samo Igrač N');
+  if (myPts) assert(T.top.some(x => x.uname && x.name === 'Cvita'), 'prijavljeni vide imena');
   c.send({ type: 'chat', text: 'bok' });
   await d.until(m => m.chat && m.chat.some(x => x.text === 'bok' && x.from === 0));
   d.send({ type: 'leave' });

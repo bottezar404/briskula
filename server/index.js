@@ -30,8 +30,35 @@ const PORT = process.env.PORT || 3000;
 const PUB = path.join(__dirname, '..', 'public');
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon' };
 
+// Sigurnosna zaglavlja (Mozilla HTTP Observatory). Sve skripte, stilovi i slike su
+// s istog poslužitelja; slike avatara su data: (JPEG) i blob: (dok se smanjuje);
+// inline style="" atributi se koriste u HTML-u koji gradi app.js pa style-src
+// treba 'unsafe-inline' (skripte NE). WebSocket je na istom hostu (/ws).
+const CSP_BASE = ["default-src 'self'", "script-src 'self'", "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob:", "font-src 'self'", "media-src 'self'", "worker-src 'self'", "manifest-src 'self'",
+  "object-src 'none'", "base-uri 'none'", "form-action 'self'", "frame-ancestors 'none'"];
+const SEC_HEADERS = {
+  'Strict-Transport-Security': 'max-age=63072000; includeSubDomains',
+  'X-Content-Type-Options': 'nosniff',
+  'X-Frame-Options': 'DENY',
+  'Referrer-Policy': 'strict-origin-when-cross-origin',
+  'Cross-Origin-Opener-Policy': 'same-origin',
+  'Cross-Origin-Resource-Policy': 'same-origin',
+  'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()',
+};
+function securityHeaders(req, res) {
+  for (const k in SEC_HEADERS) res.setHeader(k, SEC_HEADERS[k]);
+  // 'self' pokriva ws/wss u novijim preglednicima; za starije (npr. stari Safari)
+  // dodajemo i izričit ws(s)://host, samo ako je Host ispravan naziv poslužitelja
+  const host = String(req.headers.host || '');
+  const conn = /^[a-z0-9.-]{1,253}(:\d{1,5})?$/i.test(host) ? `connect-src 'self' wss://${host} ws://${host}` : "connect-src 'self'";
+  res.setHeader('Content-Security-Policy', CSP_BASE.concat(conn).join('; '));
+}
+
 const server = http.createServer((req, res) => {
-  let p = decodeURIComponent(req.url.split('?')[0]);
+  securityHeaders(req, res);
+  let p;
+  try { p = decodeURIComponent(req.url.split('?')[0]); } catch { res.writeHead(400); return res.end(); }
   if (p === '/health') { res.writeHead(200); return res.end('ok'); }
   if (p === '/') p = '/index.html';
   const file = path.normalize(path.join(PUB, p));

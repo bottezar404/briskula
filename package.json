@@ -1,11 +1,11 @@
 {
   "name": "briskula",
-  "version": "1.13.0",
+  "version": "1.14.0",
   "description": "Briškula online",
   "main": "server/index.js",
   "scripts": {
     "start": "node server/index.js",
-    "test": "node test/sim.js && node test/timer.js && node test/ready.js && node test/poker.js && node test/poker-online.js && node test/turnir.js && node test/accounts.js && node test/dm.js && node test/lobby.js && node test/version.js && node test/headers.js && node test/covjece.js"
+    "test": "node test/sim.js && node test/timer.js && node test/ready.js && node test/poker.js && node test/poker-online.js && node test/turnir.js && node test/accounts.js && node test/dm.js && node test/lobby.js && node test/version.js && node test/headers.js && node test/covjece.js && node test/kviz.js"
   },
   "author": "",
   "license": "ISC",

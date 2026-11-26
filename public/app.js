@@ -5,10 +5,11 @@
   const T = window.TresetaEngine, TB = window.TresetaBot, AV = window.Avatars;
   const P = window.PokerEngine, PB = window.PokerBot, TR = window.Turnir;
   const CJ = window.CovjeceEngine, CB = window.CovjeceBot;
-  const engOf = k => k === 'treseta' ? T : k === 'poker' ? P : k === 'covjece' ? CJ : E;
-  const botOf = k => k === 'treseta' ? TB : k === 'poker' ? PB : k === 'covjece' ? CB : B;
-  // u pokeru i Čovječe svatko igra za sebe (i u četvero); "Chi fa meno" postoji samo za briškulu i trešetu
-  const solo = k => k === 'poker' || k === 'covjece';
+  const KV = window.KvizEngine, KVB = window.KvizBot;
+  const engOf = k => k === 'treseta' ? T : k === 'poker' ? P : k === 'covjece' ? CJ : k === 'kviz' ? KV : E;
+  const botOf = k => k === 'treseta' ? TB : k === 'poker' ? PB : k === 'covjece' ? CB : k === 'kviz' ? KVB : B;
+  // u pokeru, Čovječe i kvizu svatko igra za sebe (i u četvero); "Chi fa meno" postoji samo za briškulu i trešetu
+  const solo = k => k === 'poker' || k === 'covjece' || k === 'kviz';
   const hasLow = k => k === 'briskula' || k === 'treseta';
   // strana za brojanje pobjeda
   const sideOf = (kind, mode, p) => solo(kind) ? p : E.teamOf(mode, p);
@@ -19,10 +20,11 @@
   const LEVEL_NAMES = { easy: 'Lako', normal: 'Srednje', hard: 'Teško' };
   const LOW_NAME = 'Chi fa meno';
   const CJ_NAME = 'Čovječe ne ljuti se';
-  const KIND_NAMES = { briskula: 'Briškula', treseta: 'Trešeta', poker: 'Poker', turnir: 'Turnir', covjece: CJ_NAME };
-  const KINDS = [['briskula', 'Briškula'], ['treseta', 'Trešeta'], ['poker', 'Poker'], ['turnir', 'Turnir'], ['covjece', 'Čovječe']];
+  const KV_NAME = 'Kviz ' + KV.NAME;
+  const KIND_NAMES = { briskula: 'Briškula', treseta: 'Trešeta', poker: 'Poker', turnir: 'Turnir', covjece: CJ_NAME, kviz: KV_NAME };
+  const KINDS = [['briskula', 'Briškula'], ['treseta', 'Trešeta'], ['poker', 'Poker'], ['turnir', 'Turnir'], ['covjece', 'Čovječe'], ['kviz', 'Kviz']];
   const LOWS = [[0, 'Obično'], [1, LOW_NAME]];
-  const kindLabel = (k, low) => (k === 'treseta' ? ' · Trešeta' : k === 'poker' ? ' · Poker' : k === 'covjece' ? ' · ' + CJ_NAME : '') + (low && hasLow(k) ? ' · ' + LOW_NAME : '');
+  const kindLabel = (k, low) => (k === 'treseta' ? ' · Trešeta' : k === 'poker' ? ' · Poker' : k === 'covjece' ? ' · ' + CJ_NAME : k === 'kviz' ? ' · ' + KV_NAME : '') + (low && hasLow(k) ? ' · ' + LOW_NAME : '');
   // naziv igre za prijatelje, pozive i sl., npr. "Trešeta · Chi fa meno"
   const whatName = (k, low) => k === 'turnir' ? 'Turnir' : (KIND_NAMES[k] || 'Briškula') + (low && hasLow(k) ? ' · ' + LOW_NAME : '');
   // u pokeru i Čovječe se u četvero ne igra u parovima
@@ -81,7 +83,7 @@
   // ---------- korisnički račun (nije obavezan: bez prijave se igra kao gost) ----------
   const acc = { user: null, friends: [], storage: null, err: '', tab: 'login', busy: false };
   const loggedIn = () => !!acc.user;
-  const STAT_ROWS = [['briskula', 'Briškula'], ['briskula_meno', 'Briškula · ' + LOW_NAME], ['treseta', 'Trešeta'], ['treseta_meno', 'Trešeta · ' + LOW_NAME], ['poker', 'Poker'], ['turnir', 'Turnir'], ['covjece', CJ_NAME]];
+  const STAT_ROWS = [['briskula', 'Briškula'], ['briskula_meno', 'Briškula · ' + LOW_NAME], ['treseta', 'Trešeta'], ['treseta_meno', 'Trešeta · ' + LOW_NAME], ['poker', 'Poker'], ['turnir', 'Turnir'], ['covjece', CJ_NAME], ['kviz', KV_NAME]];
   let profSent = '', profTimer = null;
   function syncProfile() {
     if (!loggedIn() || !net) return;
@@ -219,7 +221,11 @@
         }
       }
       this.dealer = (this.dealer + 1) % this.mode;
-      this.st = this.E.newGame(this.mode, { names: this.names, bots: this.names.map((_, i) => i > 0), dealer: this.dealer, low: this.low, target: this.target, blindEvery: this.tour ? TOUR_BLINDS : undefined });
+      this.kvStop();
+      // kviz: pitanja iz zadnjih partija se ne ponavljaju odmah (pamti se u pregledniku)
+      const kvUsed = this.kind === 'kviz' ? store.get('kvUsed', []) : undefined;
+      this.st = this.E.newGame(this.mode, { names: this.names, bots: this.names.map((_, i) => i > 0), dealer: this.dealer, low: this.low, target: this.target, blindEvery: this.tour ? TOUR_BLINDS : undefined, exclude: kvUsed });
+      if (this.kind === 'kviz') store.set('kvUsed', kvUsed.concat(this.st.qs.map(q => q.id)).slice(-200));
       this.counted = false;
       this.signals = [];
       this.emit(); this.schedule();
@@ -246,9 +252,27 @@
       }
       onRoom(this.view());
     }
+    kvStop() { (this.kvB || []).forEach(clearTimeout); this.kvB = []; this.kvQ = -1; }
+    // kviz: svi odgovaraju istodobno; botovi svaki u svoje vrijeme, pitanje se zatvori kad istekne vrijeme
+    kvSchedule() {
+      const st = this.st;
+      if (st.phase === 'collect') { this.kvStop(); this.timer = setTimeout(() => { KV.collect(st); this.emit(); this.schedule(); }, st.wait); }
+      else if (st.phase === 'play') {
+        this.timer = setTimeout(() => { if (KV.timeUp(st)) { this.emit(); this.schedule(); } }, Math.max(0, st.qEnd - Date.now()) + 150);
+        if (this.kvQ !== st.trickNo) {
+          this.kvStop(); this.kvQ = st.trickNo;
+          st.players.forEach((pl, p) => {
+            if (!p) return;
+            const pick = KVB.plan(st, p, this.level);
+            this.kvB.push(setTimeout(() => { if (this.st === st && st.phase === 'play' && this.kvQ === st.trickNo && KV.play(st, p, pick.move)) { this.emit(); this.schedule(); } }, Math.min(pick.delay, st.qTime - 50)));
+          });
+        }
+      } else this.kvStop();
+    }
     schedule() {
       clearTimeout(this.timer);
       const st = this.st;
+      if (this.kind === 'kviz') return this.kvSchedule();
       const pk = this.kind === 'poker', cj = this.kind === 'covjece';
       if (st.phase === 'collect') this.timer = setTimeout(() => {
         this.E.collect(st);
@@ -274,7 +298,7 @@
     }
     rematch() { this.start(); }
     leave() {
-      clearTimeout(this.timer);
+      clearTimeout(this.timer); this.kvStop();
       // poker napušten prije kraja: ulog je izgubljen (kao i online)
       if (this.kind === 'poker' && this.st.phase !== 'over' && !this.counted) { this.counted = true; reportBotGame('poker', false, 'l', this.mode); }
     }
@@ -331,10 +355,13 @@
   function onRoom(r) {
     // timer za potez: server šalje koliko je ostalo, ovdje to pretvaramo u lokalni rok
     r.turnDeadline = r.turnLeft != null ? Date.now() + r.turnLeft : 0;
+    // kviz: rok za odgovor na pitanje
+    r.qDeadline = r.game && r.game.kind === 'kviz' && r.game.phase === 'play' ? Date.now() + r.game.qLeft : 0;
     const old = room; room = r;
     const g = r.game, og = old && old.game;
     if (g && og) {
-      if (g.kind === 'covjece' && og.kind === 'covjece') cjSound(g, og);
+      if (g.kind === 'kviz' && og.kind === 'kviz') kvSound(g, og);
+      else if (g.kind === 'covjece' && og.kind === 'covjece') cjSound(g, og);
       else if (g.trick.length > og.trick.length || (g.kind === 'poker' && g.log && og.log && g.trickNo > og.trickNo && g.log.length && g.log[g.log.length - 1].p >= 0)) sfx.play();
       if (g.phase === 'play' && g.turn === g.you && !(og.phase === 'play' && og.turn === og.you)) sfx.turn();
       if (g.phase === 'over' && og.phase !== 'over') setTimeout(() => sfx.win(), 200);
@@ -734,6 +761,7 @@
     treseta: 'Trešeta: bez briškule, mora se odgovoriti na boju. Igra se u više ruku, do zadanog broja bodova.',
     poker: 'Poker (Texas Hold\'em) s običnim kartama (52 karte): 2 karte u ruci, 5 na stolu, ulaže se žetonima. Pobjeđuje tko pokupi sve žetone. Prijavljenima se žetoni pamte na računu.',
     covjece: CJ_NAME + ': društvena igra s kockom. Svatko ima 4 figure, iz kućice se izlazi šesticom, a tko stane na tuđu figuru, vraća je u kućicu. Pobjeđuje tko prvi dovede sve figure u cilj.',
+    kviz: KV_NAME + ': kviz općeg znanja. Svi odgovaraju na ista pitanja u isto vrijeme, a tko točno odgovori brže, dobije više bodova. Tri runde po pet pitanja, u finalu dvostruki bodovi.',
     turnir: 'Turnir: tri igre zaredom, <b>briškula → trešeta → poker</b>. U svakoj igri dobiješ bod za svakog protivnika kojeg nadigraš; pobjeđuje tko na kraju ima najviše bodova. U četvero se briškula i trešeta igraju u parovima, a poker svatko za sebe.',
   };
   function kindDesc(kind, low) {
@@ -874,13 +902,14 @@
           ${hasLow(r.kind) && !r.tour ? seg('roomLow', LOWS, r.low ? 1 : 0) : ''}
           ${r.tour ? `<p class="muted" style="margin-top:-4px">${KIND_DESC.turnir}</p>` : ''}
           ${r.kind === 'treseta' || r.tour ? seg('roomTarget', [[21, 'Do 21'], [31, 'Do 31'], [41, 'Do 41']], r.target) : ''}
-          <div class="muted" style="margin-bottom:6px">Vrijeme za potez</div>
-          ${seg('roomTime', TURN_OPTS, r.turnTime || 0)}
-          ${r.kind === 'covjece' ? `<p class="muted" style="margin-top:-4px">${KIND_DESC.covjece}</p>` : ''}
+          ${r.kind === 'kviz' ? '' : `<div class="muted" style="margin-bottom:6px">Vrijeme za potez</div>
+          ${seg('roomTime', TURN_OPTS, r.turnTime || 0)}`}
+          ${r.kind === 'covjece' || r.kind === 'kviz' ? `<p class="muted" style="margin-top:-4px">${KIND_DESC[r.kind]}</p>` : ''}
           <p class="muted" style="margin-top:-4px">${turnTimeDesc(r.turnTime, r.kind)}</p>`
         : r.tour ? `<p class="muted">${KIND_DESC.turnir} Trešeta se igra do ${r.target}.</p>`
         : r.kind === 'poker' ? `<p class="muted">Igra se <b>poker</b> (Texas Hold'em s običnim kartama). Ulog je ${P.START_CHIPS} žetona s računa${loggedIn() ? '' : ' (gosti igraju bez računa)'}.</p>`
         : r.kind === 'covjece' ? `<p class="muted">Igra se <b>${CJ_NAME}</b>: svatko za sebe, pobjeđuje tko prvi dovede sve 4 figure u cilj.</p>`
+        : r.kind === 'kviz' ? `<p class="muted">Igra se <b>${KV_NAME}</b>: ${KV.ROUNDS * KV.PER_ROUND} pitanja, svi odgovaraju u isto vrijeme, brži točan odgovor nosi više bodova.</p>`
         : r.kind === 'treseta' ? `<p class="muted">Igra se <b>trešeta</b>${r.low ? ' ' + LOW_NAME + ' (pobjeđuje tko ima manje)' : ''} do ${r.target} bodova.</p>`
         : r.low ? `<p class="muted">Igra se <b>${LOW_NAME}</b>: pobjeđuje tko skupi manje bodova.</p>` : ''}
         ${!r.host || r.isPublic ? `<p class="muted">${turnTimeDesc(r.turnTime, r.kind)}</p>` : ''}
@@ -898,7 +927,7 @@
     const sh = $app.querySelector('#share');
     if (sh) sh.onclick = async () => {
       const url = link();
-      if (navigator.share) { try { await navigator.share({ title: 'Briškula', text: (r.tour ? 'Dođi na turnir (briškula, trešeta, poker)' : (r.kind === 'covjece' ? 'Dođi igrati ' + CJ_NAME : 'Dođi na partiju ' + ({ treseta: 'trešete', poker: 'pokera' }[r.kind] || 'briškule'))) + '! Kod: ' + r.code, url }); return; } catch { } }
+      if (navigator.share) { try { await navigator.share({ title: 'Briškula', text: (r.tour ? 'Dođi na turnir (briškula, trešeta, poker)' : (r.kind === 'covjece' || r.kind === 'kviz' ? 'Dođi igrati ' + KIND_NAMES[r.kind] : 'Dođi na partiju ' + ({ treseta: 'trešete', poker: 'pokera' }[r.kind] || 'briškule'))) + '! Kod: ' + r.code, url }); return; } catch { } }
       try { await navigator.clipboard.writeText(url); toast('Link kopiran'); } catch { toast(url); }
     };
     $app.querySelectorAll('[data-seat]').forEach(b => b.onclick = () => ctrl.send({ type: 'seat', seat: +b.dataset.seat }));
@@ -917,6 +946,7 @@
   }
 
   function turnTimeDesc(t, kind) {
+    if (kind === 'kviz') return `⏱ Svako pitanje traje <b>${KV.QTIME / 1000} s</b>. Tko ne odgovori na vrijeme, za to pitanje dobije 0 bodova.`;
     if (!t) return '⏱ Bez ograničenja vremena za potez.';
     const after = kind === 'covjece' ? 'potez se odigra automatski i igra ide dalje.' : kind === 'poker' ? 'provjeri (ako može) ili odustane od ruke.' : 'gubi partiju.';
     return `⏱ Svaki igrač ima <b>${t} s</b> za potez. Tko ne odigra na vrijeme, ${after}`;
@@ -933,7 +963,13 @@
     for (const el of els) {
       const s = Math.max(0, Math.ceil((+el.dataset.dl - Date.now()) / 1000));
       if (el.textContent !== String(s)) el.textContent = s;
-      el.classList.toggle('low', s <= 10);
+      el.classList.toggle('low', s <= (+el.dataset.low || 10));
+    }
+    // kviz: kratki zvuk u zadnje 3 sekunde dok nisam odgovorio/la
+    const kg = room && room.game;
+    if (kg && kg.kind === 'kviz' && room.qDeadline && kg.phase === 'play' && kg.legal && kg.legal.length) {
+      const s = Math.ceil((room.qDeadline - Date.now()) / 1000);
+      if (s <= 3 && s > 0 && s !== tickBeep) { tickBeep = s; beep(880, .05, 'square'); }
     }
     // kratki zvuk u zadnjih 5 sekundi kad sam ja na potezu
     const g = room && room.game;
@@ -987,6 +1023,7 @@
   function renderGame() {
     if (room.game.kind === 'poker') return renderPoker();
     if (room.game.kind === 'covjece') return renderCovjece();
+    if (room.game.kind === 'kviz') return renderKviz();
     const r = room, g = r.game, me = g.you;
     const tre = g.kind === 'treseta';
     // online: po pravilima se bodovi broje sami, pa se tijekom ruke ne prikazuju (samo ukupni rezultat)
@@ -1553,6 +1590,164 @@
       <button id="close" style="width:100%">Zatvori</button></div>`;
   }
 
+  // ---------- kviz Znalac ----------
+  const KV_LET = ['A', 'B', 'C', 'D'];
+  const kvSec = ms => (ms / 1000).toFixed(1).replace('.', ',') + ' s';
+  const kvCat = id => id === 'mix' ? { name: 'Finale', icon: '🏆' } : KV.catOf(id);
+  const kvPts = n => Math.round(+n || 0).toLocaleString('hr-HR');
+  function kvSound(g, og) {
+    if (g.stage === 'reveal' && og.stage !== 'reveal') {
+      const a = g.players[g.you] && g.players[g.you].ans;
+      if (a && a.ok) { beep(660, .09, 'sine'); setTimeout(() => beep(990, .14, 'sine'), 90); }
+      else beep(220, .22, 'sawtooth');
+    } else if (g.phase === 'play' && og.phase !== 'play') sfx.turn();
+    else if (g.phase === 'play' && g.players.filter(p => p.done).length > og.players.filter(p => p.done).length) beep(500, .04, 'sine');
+  }
+  // tko je odabrao koji odgovor (nakon zatvaranja pitanja)
+  function kvPickers(r, g, i) {
+    return g.players.map((pl, p) => pl.ans && pl.ans.c === i ? avatar(Object.assign({}, r.seats[p] || { name: pl.name }, { cm: 0 }), 'xs') : '').join('');
+  }
+  function renderKviz() {
+    const r = room, g = r.game, me = g.you, now = Date.now();
+    const { bubbles, sysMsg } = gameBubbles(r, now);
+    const bubble = p => bubbles[p] ? `<div class="bubble ${bubbles[p].chat ? 'chatb' : ''}">${esc(bubbles[p].text)}</div>` : '';
+    const open = g.phase === 'play', rev = g.phase === 'collect' && g.stage === 'reveal', intro = g.phase === 'collect' && g.stage === 'intro';
+    const mine = g.players[me] && g.players[me].ans;
+    const canAns = open && g.legal && g.legal.length > 0;
+    const lead = g.players.reduce((m, pl) => Math.max(m, pl.score), 0);
+    const order = g.players.map((_, p) => p);
+    const plate = p => {
+      const pl = g.players[p], seat = r.seats[p] || { name: pl.name };
+      const off = seat && !seat.bot && seat.connected === false;
+      let chip = '';
+      if (open) chip = pl.done ? '<span class="kv-chip done">✓</span>' : '<span class="kv-chip wait">…</span>';
+      else if (rev) chip = pl.ans ? (pl.ans.ok ? `<span class="kv-chip ok">+${kvPts(pl.ans.pts)}</span>` : '<span class="kv-chip bad">✗</span>') : '<span class="kv-chip none">–</span>';
+      const av = S.showCm
+        ? `<span class="avw">${avatar(Object.assign({}, seat, { cm: 0 }), open && !pl.done ? 'turn' : '', bubble(p))}<span class="cml ${seat.cm ? '' : 'secret'}" title="Dužina pišulinca">${seat.cm ? seat.cm + ' cm' : 'tajna'}</span></span>`
+        : avatar(seat, open && !pl.done ? 'turn' : '', bubble(p));
+      return `<div class="kv-pl ${p === me ? 'mine' : ''} ${pl.score === lead && lead > 0 ? 'lead' : ''}">${av}
+        <div class="kv-nm">${p === me ? 'Ti' : esc(pl.name)}${off ? ' <span class="off">⚠</span>' : ''}</div>
+        <div class="kv-sc">${kvPts(pl.score)}${pl.streak >= 3 ? ` <span class="kv-fire" title="Niz točnih odgovora">🔥${pl.streak}</span>` : ''}</div>${chip}</div>`;
+    };
+    const cat = kvCat(g.cat), qc = g.qcat ? KV.catOf(g.qcat) : null;
+    const head = `<div class="kv-head"><span class="kv-cat">${cat.icon} ${esc(cat.name)}${g.mult > 1 && qc ? ` · ${qc.icon} ${esc(qc.name)}` : ''}</span>${g.mult > 1 ? '<span class="kv-x2">×2</span>' : ''}<span class="kv-no">Pitanje ${Math.min(g.qi + 1, g.total)}/${g.total}</span></div>`;
+    let card = '';
+    if (intro) {
+      const fin = g.round === g.rounds.length - 1;
+      const st = order.slice().sort((a, b) => g.players[b].score - g.players[a].score);
+      card = `<div class="kv-card kv-intro">
+        <div class="kv-rn">Runda ${g.round + 1} od ${g.rounds.length}</div>
+        <div class="kv-big">${cat.icon}</div>
+        <div class="kv-rt">${fin ? 'Finale' : esc(cat.name)}</div>
+        <p class="muted">${fin ? 'Pitanja iz svih ostalih kategorija, <b>dvostruki bodovi</b>!' : `${g.perRound} pitanja iz kategorije ${esc(cat.name)}.`}</p>
+        ${g.round > 0 ? `<ol class="kv-mini">${st.map(p => `<li class="${p === me ? 'mine' : ''}"><span>${p === me ? 'Ti' : esc(g.players[p].name)}</span><b>${kvPts(g.players[p].score)}</b></li>`).join('')}</ol>` : '<p class="muted">Brži točan odgovor nosi više bodova (500–1000).</p>'}
+      </div>`;
+    } else if (g.q) {
+      const total = g.qTime, left = open && r.qDeadline ? Math.max(0, r.qDeadline - now) : 0;
+      const timer = open ? `<div class="kv-timer"><div class="kv-bar"><i style="--d:${total}ms;--e:-${total - left}ms"></i></div><b class="kv-sec" data-dl="${r.qDeadline}" data-low="5">${Math.ceil(left / 1000)}</b></div>`
+        : '<div class="kv-timer"><div class="kv-bar done"><i></i></div><b class="kv-sec">0</b></div>';
+      const opts = g.q.opts.map((o, i) => {
+        let cls = '';
+        if (rev) cls = i === g.q.ans ? 'right' : mine && mine.c === i ? 'wrong' : 'dim';
+        else if (mine && mine.c === i) cls = 'picked';
+        return `<button class="kv-opt ${cls}" data-ans="${i}" ${canAns ? '' : 'tabindex="-1"'}><span class="kv-let">${KV_LET[i]}</span><span class="kv-ot">${esc(o)}</span>${rev ? `<span class="kv-who">${kvPickers(r, g, i)}</span>` : ''}</button>`;
+      }).join('');
+      let status = '';
+      if (open) status = mine ? 'Odgovor je zaključan, čeka se ostale…' : 'Odaberi odgovor!';
+      else if (rev) {
+        status = !mine ? '⏱ Nisi stigao/la odgovoriti.' : mine.ok ? `✅ Točno! +${kvPts(mine.pts)} (${kvSec(mine.t)})` : '❌ Netočno.';
+        const f = g.last && g.last.fast;
+        if (f != null && f >= 0 && g.players[f].ans) status += ` · ⚡ Najbrži: ${f === me ? 'ti' : esc(g.players[f].name)} (${kvSec(g.players[f].ans.t)})`;
+      }
+      card = `<div class="kv-card ${rev ? 'rev' : ''}">${head}${timer}
+        <div class="kv-q">${esc(g.q.text)}</div>
+        <div class="kv-opts ${canAns ? 'can' : ''}">${opts}</div>
+        <div class="kv-status">${sysMsg ? esc(sysMsg.text) : status}</div>
+      </div>`;
+    }
+    let tally = '';
+    if (r.wins && r.wins.some(x => x)) tally = ` · pobjede ${r.wins[me] || 0}`;
+    const sigs = g.phase === 'over' ? '' : `<div class="signals">${['👍', '😂', '😮', '🤓', '😤', '🙈'].map(t => `<button class="ghost" data-sig="${t}">${t}</button>`).join('')}</div>`;
+    $app.innerHTML = `
+      <div class="topbar">
+        <button class="ghost small" id="leave">←</button>
+        <div class="mid">Kviz · ${modeName('kviz', g.mode, true)}${r.code ? ' · ' + esc(r.code) : ' · ' + LEVEL_NAMES[r.level]}${tally}</div>
+        ${chatBtn()}
+        <button class="ghost small" id="menuBtn">⚙</button>
+      </div>
+      <div class="kv">
+        ${card}
+        <div class="kv-pls n${g.mode}">${order.map(plate).join('')}</div>
+        ${sigs}
+      </div>`;
+    $app.querySelector('#leave').onclick = () => { if (g.phase === 'over' || confirmLeave()) leave(); };
+    $app.querySelector('#menuBtn').onclick = () => { modal = 'settings'; render(); };
+    bindChatBtn();
+    if (canAns) $app.querySelectorAll('[data-ans]').forEach(b => b.onclick = () => kvAnswer(+b.dataset.ans));
+    $app.querySelectorAll('[data-sig]').forEach(b => b.onclick = () => {
+      const k = Date.now(); if (k - (renderGame.lastSig || 0) < 1500) return; renderGame.lastSig = k;
+      ctrl.signal(b.dataset.sig, false);
+    });
+    clearTimeout(renderGame.bt);
+    if (Object.keys(bubbles).length || sysMsg) renderGame.bt = setTimeout(() => render(), 4100);
+  }
+  // jedan odgovor po pitanju (i kad se klikne dvaput prije nego stigne odgovor servera)
+  let kvSent = '';
+  function kvAnswer(i) {
+    const g = room && room.game;
+    if (!g || g.kind !== 'kviz' || !g.legal || !g.legal.includes('a:' + i) || !ctrl) return;
+    const key = (room.code || 'local') + ':' + g.trickNo;
+    if (kvSent === key) return;
+    kvSent = key;
+    // odmah označi odabrani odgovor (online potvrda stiže za tren)
+    const b = $app.querySelector(`[data-ans="${i}"]`); if (b) b.classList.add('picked');
+    $app.querySelectorAll('.kv-opts').forEach(el => el.classList.remove('can'));
+    sfx.play();
+    ctrl.play('a:' + i);
+  }
+  // tipkovnica: 1–4 ili A–D
+  document.addEventListener('keydown', e => {
+    const g = room && room.game;
+    if (!g || g.kind !== 'kviz' || modal || !ctrl || e.repeat) return;
+    if (e.target && /^(INPUT|TEXTAREA)$/.test(e.target.tagName)) return;
+    const k = e.key.toLowerCase();
+    const i = /^[1-4]$/.test(k) ? +k - 1 : 'abcd'.indexOf(k);
+    if (i >= 0 && k.length === 1) { e.preventDefault(); kvAnswer(i); }
+  });
+  function kvizResultHtml() {
+    const r = room, g = r.game, res = g.result, me = g.you;
+    const myPlace = res.place.indexOf(me) + 1;
+    const title = res.draw && res.winners.includes(me) ? 'Neriješeno!' : myPlace === 1 ? 'Pobijedio/la si!' : placeText(myPlace);
+    const rows = res.place.map((p, k) => {
+      const s = res.scores[p], seat = r.seats[p] || { name: g.players[p].name };
+      return `<tr class="${res.winners.includes(p) ? 'win' : ''}"><td><span class="kv-rk">${k + 1}.</span> ${avatar(Object.assign({}, seat, { cm: 0 }), 'xs')} ${esc(g.players[p].name)}${p === me ? ' (ti)' : ''}
+        <div class="muted ak">točno ${s.correct}/${res.total}${s.correct ? ` · prosjek ${kvSec(s.time / s.correct)}` : ''}${s.best >= 3 ? ` · niz ${s.best}` : ''}</div></td><td>${kvPts(s.points)}</td></tr>`;
+    }).join('');
+    const tally = 'Pobjede: ' + r.seats.map((s, i) => esc(s.name) + ' ' + (r.wins[i] || 0)).join(' · ');
+    const canRestart = r.local || r.host;
+    const w = res.winners[0];
+    return `<div class="result-big">${title}</div>
+      <p class="muted" style="text-align:center">${res.draw ? 'Isti broj bodova, točnih odgovora i vremena!' : (w === me ? 'Imaš' : esc(g.players[w].name) + ' ima') + ` najviše bodova nakon ${res.total} pitanja.`}</p>
+      <table class="scores kv-res"><tr class="th"><td></td><td>Bodovi</td></tr>${rows}</table>
+      <p class="muted" style="text-align:center">${tally}</p>
+      ${againHtml(r, canRestart)}
+      <div class="row" style="margin-top:8px">${!r.local && r.host ? '<button class="ghost" id="lobby">Natrag u sobu</button>' : ''}<button class="ghost" id="out">Izlaz</button></div>`;
+  }
+  function kvizRulesHtml() {
+    return `<div class="rules"><h2>${KV_NAME}</h2>
+      <p>Kviz općeg znanja za 2, 3 ili 4 igrača, svatko za sebe. Svi dobiju isto pitanje u isto vrijeme i biraju jedan od četiri odgovora.</p>
+      <ul>
+        <li>Partija ima <b>${KV.ROUNDS} runde po ${KV.PER_ROUND} pitanja</b>. Prve dvije runde imaju svaka svoju kategoriju (${KV.CATS.map(c => c.name.toLowerCase()).join(', ')}).</li>
+        <li>Zadnja runda je <b>finale</b>: pitanja iz ostalih kategorija i <b>dvostruki bodovi</b>.</li>
+        <li>Na svako pitanje imaš <b>${KV.QTIME / 1000} sekundi</b>. Odgovor se ne može promijeniti.</li>
+        <li>Točan odgovor nosi <b>500 do 1000 bodova</b>: što brže odgovoriš, to više. Krivi odgovor ili bez odgovora: 0.</li>
+        <li>Tko je što odgovorio i tko je pogodio vidi se tek kad svi odgovore ili istekne vrijeme.</li>
+        <li>Pobjeđuje tko ima najviše bodova. Ako je izjednačeno, odlučuje broj točnih odgovora, pa brzina.</li>
+        <li>Na računalu možeš odgovarati i tipkama 1–4 ili A–D.</li>
+      </ul>
+      <button id="close" style="width:100%">Zatvori</button></div>`;
+  }
+
   function pokerHandHtml() {
     const r = room, g = r.game, me = g.you, hr = g.handResult;
     if (!hr) return '';
@@ -1906,7 +2101,7 @@
       <div class="lasttrick">${g.lastTrick.cards.map(t => `<div style="text-align:center"><div class="card">${Art.face(t.card)}</div><div class="muted">${esc(g.players[t.p].name)}</div></div>`).join('')}</div>
       <p style="text-align:center">Nosi: <b>${esc(g.players[g.lastTrick.winner].name)}</b>${room.local ? ` (+${ptsText(g, g.lastTrick.points)})` : ''}${g.lastTrick.last ? ' · zadnji štih' : ''}</p>
       <button id="close" style="width:100%">Zatvori</button>`;
-    else if (g && g.phase === 'over') html = g.kind === 'poker' ? pokerResultHtml() : g.kind === 'covjece' ? covjeceResultHtml() : g.kind === 'treseta' ? tresetaResultHtml() : resultHtml();
+    else if (g && g.phase === 'over') html = g.kind === 'poker' ? pokerResultHtml() : g.kind === 'covjece' ? covjeceResultHtml() : g.kind === 'kviz' ? kvizResultHtml() : g.kind === 'treseta' ? tresetaResultHtml() : resultHtml();
     else if (g && g.phase === 'hand') html = g.kind === 'poker' ? pokerHandHtml() : handEndHtml();
     if (!html) { if (el) el.remove(); return; }
     if (!el) { el = document.createElement('div'); el.id = 'overlay'; el.className = 'overlay'; document.body.appendChild(el); }
@@ -2037,6 +2232,7 @@
     if (rk === 'treseta') return tresetaRulesHtml();
     if (rk === 'poker') return pokerRulesHtml();
     if (rk === 'covjece') return covjeceRulesHtml();
+    if (rk === 'kviz') return kvizRulesHtml();
     if (rk === 'turnir') return `<div class="rules"><h2>Turnir</h2><p>${KIND_DESC.turnir}</p>
       <p>Na kraju pobjeđuje tko ima najviše bodova; ako je izjednačeno, odlučuje bolji plasman u pokeru. U turniru blindovi u pokeru rastu svake ${TOUR_BLINDS} ruke.</p>
       <p class="muted">Pravila pojedine igre vidiš tijekom te igre (⚙ → Pravila) ili kad u izborniku odabereš tu igru.</p>

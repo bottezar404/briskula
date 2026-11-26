@@ -697,3 +697,40 @@ ul.notes li div { margin-top: 2px; }
 /* dugo ime se skrati s „…”, a bodovi/žetoni uz ime uvijek ostanu vidljivi */
 .nameplate .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .nameplate > :not(.nm) { flex: none; }
+
+/* ---------- grupni chat (svi koji su online) ---------- */
+.lobby-btn { position: relative; }
+.lobby-btn .badge { position: absolute; top: -6px; right: -4px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--red); color: #fff; font-size: 11px; font-weight: 800; line-height: 18px; text-align: center; box-shadow: 0 0 0 2px var(--felt2); }
+.lobby-btn .lb-n:not(:empty)::before { content: '· '; }
+.lobby-btn .lb-n { font-size: .85em; font-weight: 500; }
+.menu.home > .lobby-main { width: 100%; margin: 0 0 12px; display: flex; align-items: center; justify-content: center; gap: 6px; }
+@media (min-width: 900px) and (min-height: 520px) { .menu.home > .lobby-main { grid-column: 1 / -1; margin: 0; } }
+.chat.lobby-chat { gap: 0; }
+.chat-head #lcWho.on { background: rgba(229,199,122,.35); }
+.lc-u { background: none; padding: 0; margin: 0; border: 0; color: inherit; font: inherit; font-weight: 700; display: inline-flex; align-items: center; gap: 5px; cursor: pointer; box-shadow: none; min-height: 0; }
+.lc-u:hover { text-decoration: underline; text-underline-offset: 2px; }
+.lc-del { background: none; border: 0; box-shadow: none; padding: 0 4px; min-height: 0; font-size: 11px; color: inherit; opacity: .45; cursor: pointer; }
+.lc-del:hover { opacity: .9; }
+.lc-join { display: block; margin-top: 6px; }
+.msg.mine .lc-join { background: #14432b; color: var(--cream); }
+.lc-who { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.lc-who li { padding: 6px 8px; border-radius: 10px; background: rgba(0,0,0,.2); }
+.lc-who .lc-u { width: 100%; font-weight: 500; gap: 8px; }
+.lc-who .lc-u b { font-weight: 700; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lc-who .tag { margin-left: auto; }
+.lc-who-head { font-size: 13px; margin: 0 2px 6px; }
+.lc-pick { margin: 0 0 8px; padding: 10px; border-radius: 12px; background: rgba(0,0,0,.3); border: 1px solid rgba(229,199,122,.35); animation: fade .15s; }
+.lc-pick-head { display: flex; align-items: center; gap: 10px; }
+.lc-pick-head .n { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.25; }
+.lc-pick-head .n b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lc-pick-head .n .muted { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lc-pick-btns { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; margin-top: 8px; }
+.lc-pick-btns .muted { font-size: 13px; }
+.lc-guest { display: flex; align-items: center; gap: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,.1); }
+.lc-guest[hidden], .chat-form[hidden], #lcRoom[hidden] { display: none; }
+.lc-guest .muted { flex: 1; font-size: 13px; }
+#lcRoom { padding: 10px; }
+@media (max-width: 899px), (max-height: 519px) {
+  .chat.lobby-chat { height: min(78vh, 600px); height: min(78dvh, 600px); }
+}
+.av.xs .pres { width: 8px; height: 8px; right: -2px; bottom: -2px; box-shadow: 0 0 0 1px #173f2a; }

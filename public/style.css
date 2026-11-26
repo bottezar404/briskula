@@ -1053,3 +1053,10 @@ body.tb-drvo { background: repeating-linear-gradient(92deg, rgba(0,0,0,.06) 0 3p
 /* s kupljenim stolom i prozori/ladice dobiju njegovu boju */
 body[class*="tb-"] .modal, body[class*="tb-"] .chat, body[class*="tb-"] .sf-panel, body[class*="tb-"] .sf-tab { background: var(--felt2); }
 .av-pick .pen { z-index: 3; }
+
+/* profil igrača: klik na avatar/ime otvara njegovu statistiku */
+.prof-link { background: none; border: 0; padding: 0; margin: 0; box-shadow: none; color: inherit; font: inherit; font-weight: inherit; cursor: pointer; flex: none; border-radius: 50%; }
+span.prof-link { border-radius: 0; flex: 1; min-width: 0; }
+.prof-link:hover .av { filter: brightness(1.08); }
+.friends .fst { display: block; font-size: 12px; color: var(--gold); opacity: .9; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.prof-head { margin-bottom: 10px; }

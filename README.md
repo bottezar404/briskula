@@ -69,6 +69,14 @@ Može i [Supabase](https://supabase.com): *Connect* → **Session pooler** (ne �
 preko IPv6, a Render ga ne podržava), zamijeni `[YOUR-PASSWORD]` lozinkom baze i to stavi u `DATABASE_URL`.
 Besplatni Supabase projekt se pauzira nakon tjedan dana bez korištenja (ponovno se pokrene u Supabase nadzornoj ploči).
 
+## Admin, povijest partija
+
+- `ADMINS` (zadano `Botti`): korisnička imena (zarezom) admina. Admin u „Moj račun → Admin” može igraču koji je zaboravio
+  lozinku postaviti **privremenu lozinku** (sve njegove prijave se odjave, a nakon prijave mu aplikacija ponudi promjenu)
+  i pogledati **povijest partija** bilo kojeg igrača. Admini smiju i brisati poruke u grupnom chatu (kao `LOBBY_ADMINS`).
+- **Povijest partija**: za online partije (barem dva čovjeka, barem jedan prijavljen) server sprema sve poteze
+  (`server/history.js`); svaki igrač vidi svojih zadnjih 20 (Statistika → Povijest partija).
+
 ## Objava
 
 Treba bilo koji hosting koji vrti Node i podržava WebSocket (npr. Render, Railway, Fly.io).

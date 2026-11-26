@@ -451,7 +451,12 @@ function presenceOf(uid) {
     const c = clients.get(t);
     if (!c || !c.ws) continue;
     const r = c.room && rooms.get(c.room);
-    if (!r) { best = best || { where: 'menu' }; continue; }
+    if (!r) {
+      // partija protiv botova se igra u pregledniku, klijent javi koju igra
+      const b = c.bots ? { where: 'bots', kind: c.bots.kind, low: c.bots.low, mode: c.bots.mode } : { where: 'menu' };
+      if (!best || (best.where === 'menu' && b.where === 'bots')) best = b;
+      continue;
+    }
     const playing = r.game && r.game.phase !== 'over';
     const p = { where: playing ? 'game' : 'lobby', code: r.code, kind: r.tour ? 'turnir' : r.kind, low: r.low, mode: r.mode, open: !playing && r.seats.some(s => !s || s.bot) };
     if (!best || best.where === 'menu' || (p.where === 'lobby' && best.where === 'game')) best = p;
@@ -656,6 +661,7 @@ wss.on('connection', (ws, req) => {
     }
     switch (m.type) {
       case 'setName': c.name = clean(m.name) || c.name; break;
+      case 'botGame': c.bots = m.off ? null : { kind: kindOf(m), low: lowOf(m), mode: [2, 3, 4].includes(+m.mode) ? +m.mode : 2 }; presenceSoon(); break;
       case 'profile': {
         const acc = setProfile(c, m);
         const u = c.uid && ACC.user(c.uid);

@@ -154,9 +154,10 @@
   function friendWhere(f) {
     const a = f.at;
     if (!a) return f.seen ? 'Offline · ' + agoText(f.seen) : 'Offline';
-    if (a.where === 'menu') return 'Online';
-    const what = a.kind === 'turnir' ? 'Turnir' : (KIND_NAMES[a.kind] || 'Briškula');
-    return (a.where === 'game' ? 'Igra: ' : 'U sobi: ') + what + ' · ' + modeName(a.kind, a.mode, true);
+    if (a.where === 'menu') return 'Online · u izborniku';
+    const what = a.kind === 'turnir' ? 'Turnir' : (KIND_NAMES[a.kind] || 'Briškula') + (a.low && a.kind !== 'poker' ? ' · ' + LOW_NAME : '');
+    const pre = a.where === 'bots' ? 'Igra s botovima: ' : a.where === 'game' ? 'Igra: ' : 'U sobi: ';
+    return pre + what + ' · ' + modeName(a.kind, a.mode, true);
   }
 
   let room = null;       // trenutni prikaz sobe (lokalne ili online)
@@ -619,7 +620,12 @@
     $app.querySelectorAll('[data-cm]').forEach(b => b.onclick = () => setCm(S.cm + +b.dataset.cm));
     bindSegs();
     const needName = () => { if (!S.name) { S.name = 'Igrač' + Math.floor(Math.random() * 900 + 100); save(); } };
-    $app.querySelector('#playBots').onclick = () => { needName(); ctrl = new LocalGame(+S.botMode, S.botLevel, S.name, S.kind, S.target, !['poker', 'turnir'].includes(S.kind) && !!S.naManje); };
+    $app.querySelector('#playBots').onclick = () => {
+      needName();
+      const low = !['poker', 'turnir'].includes(S.kind) && !!S.naManje;
+      if (loggedIn() && net) net.send({ type: 'botGame', kind: S.kind, low, mode: +S.botMode }); // prijatelji vide u kojoj si igri
+      ctrl = new LocalGame(+S.botMode, S.botLevel, S.name, S.kind, S.target, low);
+    };
     if (!window.BRK_OFFLINE) {
     $app.querySelector('#create').onclick = () => { needName(); ctrl = getNet(); ctrl.send(profileMsg()); ctrl.send({ type: 'create', mode: +S.onMode, level: 'normal', kind: S.kind, low: !!S.naManje, target: S.target, turnTime: S.turnTime }); };
     $app.querySelector('#quick').onclick = () => { needName(); ctrl = getNet(); ctrl.send(profileMsg()); ctrl.send({ type: 'quick', mode: +S.onMode, kind: S.kind, low: !!S.naManje }); };
@@ -748,6 +754,7 @@
 
   function leave() {
     if (ctrl) ctrl.leave();
+    if (ctrl instanceof LocalGame && net) net.send({ type: 'botGame', off: true });
     ctrl = null; room = null; modal = null; chat.open = false;
     if (location.search) history.replaceState(null, '', location.pathname);
     render();

@@ -534,3 +534,43 @@ label.upload:active { transform: scale(.98); }
   .me.poker .praise { position: absolute; left: 8px; right: 8px; width: auto; max-width: none; bottom: calc(100% + 6px); z-index: 12;
     background: rgba(12,40,26,.96); border: 1px solid rgba(229,199,122,.4); box-shadow: 0 6px 24px rgba(0,0,0,.5); }
 }
+
+/* ---------- račun, statistika, prijatelji ---------- */
+.acc-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,.1); }
+.acc-row.guest { justify-content: space-between; }
+.acc-row:not(.guest) > button { flex: 1 1 auto; padding: 8px 8px; font-size: 13px; position: relative; white-space: nowrap; }
+.acc-row #accBtn { overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.on-n { display: inline-block; min-width: 18px; padding: 0 5px; margin-left: 3px; border-radius: 9px; background: #3fbf6a; color: #08260f; font-size: 11px; font-weight: 800; line-height: 18px; text-align: center; }
+.acc-row .badge, .friends .badge { position: absolute; top: -6px; right: -4px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--red); color: #fff; font-size: 11px; font-weight: 800; line-height: 18px; text-align: center; box-shadow: 0 0 0 2px var(--felt2); }
+.center-row { justify-content: center; flex-wrap: wrap; }
+.center-row > * { flex: 0 0 auto; }
+.modal .err { color: #ffb4a8; background: rgba(184,50,42,.25); border-radius: 8px; padding: 7px 10px; margin: 8px 0 0; font-size: 14px; }
+.modal .warn { color: #ffe3a3; background: rgba(229,199,122,.14); border-radius: 8px; padding: 7px 10px; font-size: 13px; }
+.modal form.stack { margin-bottom: 10px; }
+.modal h3 { font-size: 15px; color: var(--gold); margin: 14px 0 4px; }
+.acc-head { display: flex; gap: 14px; align-items: center; margin: 4px 0 10px; }
+.acc-head b { font-size: 18px; }
+details.pw { margin: 8px 0; }
+details.pw summary { cursor: pointer; padding: 6px 0; color: var(--gold); font-weight: 600; }
+.scores.stats th { font-size: 12px; font-weight: 600; opacity: .75; text-align: right; padding: 4px 6px; }
+.scores.stats th:first-child { text-align: left; }
+.scores.stats td { padding: 6px; font-size: 14px; }
+.scores.stats td:not(:first-child) { text-align: right; font-variant-numeric: tabular-nums; }
+.scores.stats td:last-child { font-size: 14px; }
+.scores.stats tr.zero td { opacity: .45; }
+.scores.stats tr.tot td { font-weight: 800; color: var(--gold); border-bottom: 0; }
+.friends li { gap: 8px; padding: 8px 10px; }
+.friends li .n { min-width: 0; overflow: hidden; }
+.friends li .n b { font-weight: 700; }
+.friends li .n .muted { font-size: 12px; }
+.friends li .sub { display: block; font-size: 12px; opacity: .7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.friends li.online .sub { color: #8be0a6; opacity: 1; }
+.friends li button { flex: 0 0 auto; padding: 7px 10px; }
+.av .pres { position: absolute; right: -2px; bottom: -2px; width: 12px; height: 12px; border-radius: 50%; background: #777; box-shadow: 0 0 0 2px #173f2a; }
+.av .pres.on { background: #3fbf6a; }
+.invite { position: fixed; left: 0; right: 0; margin: 0 auto; top: calc(10px + env(safe-area-inset-top)); z-index: 120; display: flex; gap: 10px; align-items: center;
+  background: #173f2a; border: 1px solid var(--gold); border-radius: 14px; padding: 10px 12px; box-shadow: 0 8px 30px rgba(0,0,0,.55); width: max-content; max-width: calc(100vw - 20px); animation: pop .25s ease-out; }
+.invite[hidden] { display: none; }
+.invite > div { flex: 1; font-size: 14px; line-height: 1.35; }
+.invite .muted { font-size: 12px; }
+.invite button { flex: 0 0 auto; }

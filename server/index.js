@@ -13,6 +13,9 @@ const AV = require('../public/avatars.js');
 const P = require('../public/poker.js');
 const PB = require('../public/poker-bot.js');
 const TR = require('../public/turnir.js');
+const Store = require('./store.js');
+const Accounts = require('./accounts.js');
+const ACC = Accounts.create(Store.open());
 // igra: briškula ili trešeta; low = "Chi fa meno" (na manje) za obje
 // (stari klijenti šalju kind 'meno' = briškula na manje)
 const kindOf = m => m.kind === 'treseta' || m.kind === 'poker' || m.kind === 'turnir' ? m.kind : 'briskula';
@@ -94,19 +97,35 @@ function storeImg(d) {
   return id;
 }
 const cleanCm = v => { v = Math.round(+v); return v >= 1 && v <= 50 ? v : 0; };
+// vraća profil za korisnički račun (ako je igrač prijavljen)
 function setProfile(c, m) {
-  if ('name' in m) c.name = clean(m.name) || c.name || 'Igrač';
-  if ('cm' in m) c.cm = cleanCm(m.cm);
+  const acc = {};
+  if ('name' in m) acc.name = c.name = clean(m.name) || c.name || 'Igrač';
+  if ('cm' in m) acc.cm = c.cm = cleanCm(m.cm);
   if ('av' in m) {
-    if (m.av === 'img') { const d = cleanImg(m.img); c.av = d ? 'i:' + storeImg(d) : (c.av || 'e0'); }
-    else c.av = cleanAv(m.av) || c.av || null;
+    if (m.av === 'img') {
+      const d = cleanImg(m.img);
+      if (d) { c.av = 'i:' + storeImg(d); acc.av = 'img'; acc.img = d; } else c.av = c.av || 'e0';
+    } else { c.av = cleanAv(m.av) || c.av || null; if (c.av && !c.av.startsWith('i:')) acc.av = c.av; }
   }
+  return acc;
+}
+// trenutni profil igrača u obliku za račun
+function accProfile(c) {
+  const id = c.av && c.av.startsWith('i:') ? c.av.slice(2) : null;
+  return { name: c.name, cm: c.cm || 0, av: id ? (IMGS.has(id) ? 'img' : null) : c.av || null, img: id && IMGS.get(id) || null };
+}
+// profil iz računa (npr. nakon prijave na drugom uređaju)
+function profileFromUser(c, u) {
+  c.name = u.name || u.uname; c.cm = u.cm || 0;
+  c.av = u.av === 'img' && u.img ? 'i:' + storeImg(u.img) : cleanAv(u.av) || c.av;
 }
 // prikaz mjesta: ljudi uvijek s trenutnim profilom
 function seatAv(s) {
   if (s.bot) return { av: s.av || AV.forName(s.name), cm: s.cm || 0 };
   const c = clients.get(s.token);
-  return { av: (c && c.av) || AV.forName(s.name), cm: (c && c.cm) || 0 };
+  const u = c && c.uid && ACC.user(c.uid);
+  return Object.assign({ av: (c && c.av) || AV.forName(s.name), cm: (c && c.cm) || 0 }, u ? { uname: u.uname } : {});
 }
 
 function createRoom(mode, host, opts) {
@@ -185,18 +204,23 @@ function pushSignal(r, from, text, teamOnly) {
   if (r.signals.length > 20) r.signals.shift();
 }
 
+// slike koje ovaj klijent još nije dobio
+function newImgs(c, avs) {
+  const imgs = {};
+  for (const av of avs) if (av && av.startsWith('i:')) {
+    const id = av.slice(2);
+    if (c && c.sentImgs && c.sentImgs.has(id)) continue;
+    if (IMGS.has(id)) { imgs[id] = IMGS.get(id); if (c && c.sentImgs) c.sentImgs.add(id); }
+  }
+  return imgs;
+}
+
 function roomView(r, token) {
   const you = seatOf(r, token);
   const g = r.game;
   const c = clients.get(token);
   const seats = r.seats.map(s => s ? Object.assign({ name: s.name, bot: !!s.bot, connected: s.bot || !!(clients.get(s.token) && clients.get(s.token).ws) }, seatAv(s)) : null);
-  // slike koje ovaj klijent još nije dobio
-  const imgs = {};
-  for (const s of seats) if (s && s.av.startsWith('i:')) {
-    const id = s.av.slice(2);
-    if (c && c.sentImgs && c.sentImgs.has(id)) continue;
-    if (IMGS.has(id)) { imgs[id] = IMGS.get(id); if (c && c.sentImgs) c.sentImgs.add(id); }
-  }
+  const imgs = newImgs(c, seats.map(s => s && s.av));
   const tl = turnLeft(r);
   return {
     type: 'room', imgs, turnTime: r.turnTime, turnLeft: tl,
@@ -218,7 +242,9 @@ function broadcast(r) {
     r.counted = g;
     if (!g.result.draw && g.result.forfeit == null) r.wins[sideOf(r, g.result.winners[0])]++;
     if (r.tour && !r.tour.done) TR.record(r.tour, r.kind, g.result);
+    recordStats(r, g);
   }
+  presenceSoon();
   turnTimer(r); // pokreni/zaustavi timer za potez prije slanja, da klijenti vide odbrojavanje
   for (const s of r.seats) if (s && !s.bot) { const c = clients.get(s.token); if (c && c.room === r.code) send(c.ws, roomView(r, s.token)); }
 }
@@ -236,8 +262,32 @@ function startGame(r) {
   if (r.kind === 'poker') r.game = P.newGame(r.mode, o);
   else r.game = r.kind === 'treseta' ? T.newGame(r.mode, Object.assign(o, { target: r.target, low: r.low })) : E.newGame(r.mode, Object.assign(o, { low: r.low }));
   r.signals = []; r.ready = new Set();
+  // tko je za stolom s računom (za statistiku; tko izađe usred partije, upiše mu se poraz)
+  r.uids = r.seats.map(s => { const c = !s.bot && clients.get(s.token); return c && c.uid || null; });
+  r.humans = r.seats.filter(s => !s.bot).length;
   broadcast(r); schedule(r);
   return true;
+}
+
+// ---------- statistika ----------
+function recordStats(r, g) {
+  if (!r.uids || !g.result) return;
+  const res = g.result;
+  const section = r.humans >= 2 ? 'online' : 'bots';
+  const key = Accounts.statKey(r.kind, r.low);
+  // zadnja igra turnira: upiši i cijeli turnir (pobjeda = prvo mjesto)
+  const st = r.tour && r.tour.done ? TR.standings(r.tour) : null;
+  r.uids.forEach((uid, i) => {
+    const u = uid && ACC.user(uid);
+    if (!u) return;
+    ACC.record(u, section, key, res.draw ? 'd' : res.winners.includes(i) ? 'w' : 'l');
+    if (st) {
+      const firsts = st.filter(x => x.place === 1).length;
+      ACC.record(u, section, 'turnir', firsts === st.length ? 'd' : st.find(x => x.p === i).place === 1 ? 'w' : 'l');
+    }
+    pushAccount(uid);
+  });
+  r.uids = null; // jednom po partiji
 }
 
 // timer za potez vrijedi samo kad su za stolom barem dva čovjeka
@@ -290,6 +340,7 @@ function forfeit(r, p) {
   teams.forEach((_, t) => { if (t !== lost) r.wins[t]++; });
   r.counted = g;
   if (r.tour && !r.tour.done) TR.record(r.tour, r.kind, g.result);
+  recordStats(r, g);
   pushSignal(r, -1, g.players[p].name + ' nije odigrao/la na vrijeme. Partija je gotova.');
   broadcast(r);
 }
@@ -343,8 +394,159 @@ function botMove(r) {
   broadcast(r); schedule(r);
 }
 
-wss.on('connection', ws => {
+// ---------- računi, prijatelji, tko je online ----------
+const online = new Map(); // uid -> Set(token)
+const tokensOf = uid => online.get(uid) || new Set();
+const isOnline = uid => [...tokensOf(uid)].some(t => { const c = clients.get(t); return c && c.ws; });
+function attach(token, c, u, sess) {
+  detach(token, c);
+  c.uid = u.id; c.sess = sess;
+  if (!online.has(u.id)) online.set(u.id, new Set());
+  online.get(u.id).add(token);
+  ACC.touch(u);
+  presenceSoon();
+}
+function detach(token, c) {
+  if (!c.uid) return;
+  const set = online.get(c.uid);
+  if (set) { set.delete(token); if (!set.size) online.delete(c.uid); }
+  c.uid = null; c.sess = null;
+  presenceSoon();
+}
+// gdje je korisnik: null (offline), 'menu', 'lobby' ili 'game' (+ soba)
+function presenceOf(uid) {
+  let best = null;
+  for (const t of tokensOf(uid)) {
+    const c = clients.get(t);
+    if (!c || !c.ws) continue;
+    const r = c.room && rooms.get(c.room);
+    if (!r) { best = best || { where: 'menu' }; continue; }
+    const playing = r.game && r.game.phase !== 'over';
+    const p = { where: playing ? 'game' : 'lobby', code: r.code, kind: r.tour ? 'turnir' : r.kind, low: r.low, mode: r.mode, open: !playing && r.seats.some(s => !s || s.bot) };
+    if (!best || best.where === 'menu' || (p.where === 'lobby' && best.where === 'game')) best = p;
+  }
+  return best;
+}
+function friendsView(u, c) {
+  const list = [];
+  for (const fid in u.friends) {
+    const f = ACC.user(+fid);
+    if (!f) continue;
+    const av = f.av === 'img' && f.img ? 'i:' + storeImg(f.img) : f.av || AV.forName(f.name || f.uname);
+    list.push({ id: f.id, uname: f.uname, name: f.name || f.uname, av, cm: f.cm || 0, status: u.friends[fid], at: u.friends[fid] === 'ok' ? presenceOf(f.id) : null, seen: u.friends[fid] === 'ok' ? f.seen : null });
+  }
+  return { list, imgs: newImgs(c, list.map(f => f.av)) };
+}
+function accountMsg(u, c, withImg) {
+  const fv = friendsView(u, c);
+  return {
+    type: 'account', storage: ACC.kind,
+    user: Object.assign({ id: u.id, uname: u.uname, name: u.name, av: u.av, cm: u.cm, stats: u.stats }, withImg ? { img: u.img } : {}),
+    friends: fv.list, imgs: fv.imgs,
+  };
+}
+function pushAccount(uid, withImg) {
+  const u = ACC.user(uid);
+  if (!u) return;
+  for (const t of tokensOf(uid)) { const c = clients.get(t); if (c && c.ws) send(c.ws, accountMsg(u, c, withImg)); }
+}
+// promjene "tko je gdje" šalju se prijateljima (skupljeno, najviše jednom u 300 ms)
+const lastPresence = new Map();
+let presenceTimer = null;
+function presenceSoon() { if (!presenceTimer) presenceTimer = setTimeout(presenceTick, 300); }
+function presenceTick() {
+  presenceTimer = null;
+  const ids = new Set([...online.keys(), ...lastPresence.keys()]);
+  const notify = new Set();
+  for (const uid of ids) {
+    const p = JSON.stringify(presenceOf(uid));
+    if (lastPresence.get(uid) === p) continue;
+    if (p === 'null') lastPresence.delete(uid); else lastPresence.set(uid, p);
+    const u = ACC.user(uid);
+    if (!u) continue;
+    if (p === 'null') ACC.touch(u); // zadnji put viđen
+    for (const fid in u.friends) if (u.friends[fid] === 'ok' && online.has(+fid)) notify.add(+fid);
+  }
+  for (const uid of notify) pushAccount(uid);
+}
+const ipOf = req => String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket.remoteAddress || '';
+const STAT_GAP = 8000; // partija protiv botova ne može trajati kraće
+
+function accountMessage(m, token, c, ws, ip) {
+  const err = msg => send(ws, { type: 'error', msg });
+  const authErr = msg => send(ws, { type: 'authError', msg });
+  const u = c.uid ? ACC.user(c.uid) : null;
+  switch (m.type) {
+    case 'register': case 'login': {
+      const res = m.type === 'register'
+        ? ACC.register(m.uname, m.pass, accProfile(c), ip)
+        : ACC.login(m.uname, m.pass, ip);
+      if (res.error) return authErr(res.error);
+      attach(token, c, res.user, res.token);
+      if (m.type === 'login') profileFromUser(c, res.user);
+      send(ws, { type: 'auth', token: res.token, fresh: m.type === 'register' });
+      send(ws, accountMsg(res.user, c, true));
+      const r = c.room && rooms.get(c.room);
+      if (r) broadcast(r);
+      return;
+    }
+    case 'logout': if (c.sess) ACC.logout(c.sess); detach(token, c); send(ws, { type: 'account', user: null, friends: [] }); return;
+    case 'account': if (u) send(ws, accountMsg(u, c)); return;
+    case 'password': {
+      if (!u) return;
+      const res = ACC.changePass(u, m.old, m.pass);
+      return res.error ? authErr(res.error) : send(ws, { type: 'info', msg: 'Lozinka je promijenjena.' });
+    }
+    case 'friendAdd': {
+      if (!u) return err('Prijavi se da dodaš prijatelje.');
+      const res = ACC.befriend(u, m.uname);
+      if (res.error) return err(res.error);
+      send(ws, { type: 'info', msg: res.accepted ? res.friend.uname + ' ti je sada prijatelj/ica!' : 'Zahtjev poslan korisniku ' + res.friend.uname + '.' });
+      pushAccount(u.id); pushAccount(res.friend.id);
+      return;
+    }
+    case 'friendAccept': case 'friendRemove': {
+      if (!u) return;
+      const res = m.type === 'friendAccept' ? ACC.accept(u, +m.id) : ACC.unfriend(u, +m.id);
+      if (res.error) return err(res.error);
+      pushAccount(u.id); if (res.friend) pushAccount(res.friend.id);
+      return;
+    }
+    case 'invite': {
+      if (!u) return;
+      const f = ACC.user(+m.id);
+      const r = c.room && rooms.get(c.room);
+      if (!f || u.friends[f.id] !== 'ok') return err('Možeš pozvati samo prijatelje.');
+      if (!r) return err('Prvo napravi sobu.');
+      if (!isOnline(f.id)) return err((f.name || f.uname) + ' nije online.');
+      const now = Date.now();
+      if (now - (c.lastInvite || 0) < 1500) return;
+      c.lastInvite = now;
+      const inv = { type: 'invite', from: u.name || u.uname, uname: u.uname, code: r.code, kind: r.tour ? 'turnir' : r.kind, low: r.low, mode: r.mode };
+      for (const t of tokensOf(f.id)) { const fc = clients.get(t); if (fc && fc.ws && fc.room !== r.code) send(fc.ws, inv); }
+      send(ws, { type: 'info', msg: 'Poziv poslan: ' + (f.name || f.uname) });
+      return;
+    }
+    case 'stat': {
+      // partija protiv botova u pregledniku (server je ne vidi, pa vjeruje klijentu)
+      if (!u) return;
+      const key = Accounts.statKey(kindOf(m), lowOf(m));
+      if (!['w', 'l', 'd'].includes(m.res)) return;
+      c.statAt = c.statAt || {};
+      const now = Date.now();
+      if (now - (c.statAt[key] || 0) < STAT_GAP) return;
+      c.statAt[key] = now;
+      ACC.record(u, 'bots', key, m.res);
+      pushAccount(u.id);
+      return;
+    }
+  }
+}
+const ACCOUNT_MSGS = new Set(['register', 'login', 'logout', 'account', 'password', 'friendAdd', 'friendAccept', 'friendRemove', 'invite', 'stat']);
+
+wss.on('connection', (ws, req) => {
   let token = null;
+  const ip = ipOf(req);
   ws.on('message', raw => {
     let m; try { m = JSON.parse(raw); } catch { return; }
     if (m.type === 'hello') {
@@ -360,16 +562,32 @@ wss.on('connection', ws => {
       const r = c.room && rooms.get(c.room);
       if (r && seatOf(r, token) >= 0) { broadcast(r); schedule(r); }
       else c.room = null;
+      // prijavljeni korisnik (token sesije iz preglednika)
+      if (m.auth) ACC.ready.then(() => {
+        const u = ACC.bySession(m.auth);
+        if (c.ws !== ws) return;
+        if (!u) { detach(token, c); return send(ws, { type: 'account', user: null, friends: [], expired: true }); }
+        attach(token, c, u, m.auth);
+        send(ws, accountMsg(u, c, true));
+      });
+      else detach(token, c);
+      presenceSoon();
       return;
     }
     if (!token) return;
     const c = clients.get(token);
     const r = c.room ? rooms.get(c.room) : null;
     const err = msg => send(ws, { type: 'error', msg });
+    if (ACCOUNT_MSGS.has(m.type)) {
+      if (!ACC.isReady()) return m.type === 'login' || m.type === 'register' ? send(ws, { type: 'authError', msg: 'Računi trenutno nisu dostupni (baza se spaja). Pokušaj za minutu.' }) : undefined;
+      return accountMessage(m, token, c, ws, ip);
+    }
     switch (m.type) {
       case 'setName': c.name = clean(m.name) || c.name; break;
       case 'profile': {
-        setProfile(c, m);
+        const acc = setProfile(c, m);
+        const u = c.uid && ACC.user(c.uid);
+        if (u) ACC.setProfile(u, acc);
         const i = r ? seatOf(r, token) : -1;
         if (i >= 0 && (!r.game || r.game.phase === 'over')) r.seats[i].name = c.name;
         if (r) broadcast(r);
@@ -399,7 +617,7 @@ wss.on('connection', ws => {
         if (!nr.seats.includes(null)) startGame(nr); else broadcast(nr);
         break;
       }
-      case 'leave': leaveCurrent(token); send(ws, { type: 'left' }); break;
+      case 'leave': leaveCurrent(token); send(ws, { type: 'left' }); presenceSoon(); break;
       case 'seat': {
         if (!r || (r.game && r.game.phase !== 'over')) return;
         if (tourBusy(r)) return err('Tijekom turnira mjesta se ne mijenjaju (bodovi pripadaju mjestu).');
@@ -470,6 +688,7 @@ wss.on('connection', ws => {
     c.ws = null;
     const r = c.room && rooms.get(c.room);
     if (r) { broadcast(r); schedule(r); }
+    presenceSoon();
   });
 });
 
@@ -477,8 +696,12 @@ wss.on('connection', ws => {
 setInterval(() => {
   const now = Date.now();
   for (const [k, r] of rooms) if (now - r.touched > ROOM_TTL) { clearTimeout(r.timer); stopTurnTimer(r); rooms.delete(k); }
-  for (const [k, c] of clients) if (!c.ws && !c.room) clients.delete(k);
+  for (const [k, c] of clients) if (!c.ws && !c.room) { detach(k, c); clients.delete(k); }
 }, 60000).unref();
 
+// Render (i ostali) šalju SIGTERM prije gašenja: zapiši sve u bazu
+process.once('SIGTERM', () => { ACC.flush().finally(() => process.exit(0)); setTimeout(() => process.exit(0), 4000).unref(); });
+
 server.listen(PORT, () => console.log('Briškula server na http://localhost:' + PORT));
+server.accounts = ACC;
 module.exports = server;

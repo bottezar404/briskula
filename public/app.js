@@ -57,7 +57,7 @@
   if (![21, 31, 41].includes(S.target)) S.target = 41;
   if (![0, 15, 30, 60].includes(S.turnTime)) S.turnTime = 30;
   const TURN_OPTS = [[15, '15 s'], [30, '30 s'], [60, '60 s'], [0, 'Bez']];
-  function save() { for (const k in S) store.set(k, S[k]); }
+  function save() { for (const k in S) store.set(k, S[k]); syncProfile(); }
 
   // ---------- avatari ----------
   const CM_MAX = 50;
@@ -69,6 +69,88 @@
   function avatar(seat, cls, extra) {
     if (!seat) return `<span class="av ${cls || ''} empty"></span>`;
     return `<span class="av ${cls || ''}">${AV.inner(seat.av, imgCache, seat.name)}${seat.cm ? `<span class="cmb" title="Dužina pišulinca">${seat.cm}<small>cm</small></span>` : ''}${extra || ''}</span>`;
+  }
+
+  // ---------- korisnički račun (nije obavezan: bez prijave se igra kao gost) ----------
+  const acc = { user: null, friends: [], storage: null, err: '', tab: 'login', busy: false };
+  const loggedIn = () => !!acc.user;
+  const STAT_ROWS = [['briskula', 'Briškula'], ['briskula_meno', 'Briškula · ' + LOW_NAME], ['treseta', 'Trešeta'], ['treseta_meno', 'Trešeta · ' + LOW_NAME], ['poker', 'Poker'], ['turnir', 'Turnir']];
+  let profSent = '', profTimer = null;
+  function syncProfile() {
+    if (!loggedIn() || !net) return;
+    clearTimeout(profTimer);
+    profTimer = setTimeout(() => {
+      const m = JSON.stringify(profileMsg());
+      if (m !== profSent) { profSent = m; net.send(profileMsg()); }
+    }, 700);
+  }
+  function onAccount(m) {
+    if (m.imgs) Object.assign(imgCache, m.imgs);
+    if (m.storage) acc.storage = m.storage;
+    const was = acc.user;
+    acc.user = m.user; acc.friends = m.friends || [];
+    if (!m.user) {
+      if (m.expired || was) store.set('auth', null);
+      if (m.expired) toast('Prijava je istekla, prijavi se ponovno.');
+    } else if ('img' in m.user) {
+      // nakon prijave profil dolazi iz računa (isti na svim uređajima)
+      const u = m.user;
+      if (u.name) S.name = u.name;
+      S.cm = Math.max(0, Math.min(CM_MAX, +u.cm || 0));
+      if (u.av === 'img' && u.img) { S.avatarImg = u.img; S.avatar = 'img'; }
+      else if (/^e\d{1,2}$/.test(u.av || '')) S.avatar = u.av;
+      profSent = JSON.stringify(profileMsg());
+      save();
+    }
+    if (!was && m.user && modal === 'account') modal = null;
+    acc.busy = false;
+    if (!room || modal || !room.game) render();
+  }
+  function friendCounts() {
+    const ok = acc.friends.filter(f => f.status === 'ok');
+    return { on: ok.filter(f => f.at).length, req: acc.friends.filter(f => f.status === 'in').length };
+  }
+  // poziv u sobu od prijatelja
+  function showInvite(m) {
+    let el = document.getElementById('invite');
+    if (!el) { el = document.createElement('div'); el.id = 'invite'; el.className = 'invite'; document.body.appendChild(el); }
+    const what = m.kind === 'turnir' ? 'Turnir' : (KIND_NAMES[m.kind] || 'Briškula') + (m.low && m.kind !== 'poker' ? ' · ' + LOW_NAME : '');
+    el.innerHTML = `<div><b>${esc(m.from)}</b> te zove u sobu<br><span class="muted">${esc(what)} · ${esc(modeName(m.kind, m.mode, true))} · ${esc(m.code)}</span></div>
+      <button class="small" id="invGo">Uđi</button><button class="ghost small" id="invX" aria-label="Zatvori">✕</button>`;
+    el.hidden = false;
+    sfx.chat();
+    clearTimeout(showInvite.t); showInvite.t = setTimeout(() => { el.hidden = true; }, 30000);
+    el.querySelector('#invX').onclick = () => { el.hidden = true; };
+    el.querySelector('#invGo').onclick = () => { el.hidden = true; joinRoomCode(m.code); };
+  }
+  function joinRoomCode(code) {
+    if (room && room.code === code) return;
+    if (room && room.game && room.game.phase !== 'over' && !confirmLeave()) return;
+    if (room) leave();
+    modal = null;
+    if (!S.name) { S.name = 'Igrač' + Math.floor(Math.random() * 900 + 100); save(); }
+    ctrl = getNet(); ctrl.send(profileMsg()); ctrl.send({ type: 'join', code });
+  }
+  // partija protiv botova: rezultat se javi serveru za statistiku (samo kad je igrač prijavljen)
+  function reportBotGame(kind, low, res) {
+    if (loggedIn() && net) net.send({ type: 'stat', kind, low: !!low, res });
+  }
+  function agoText(t) {
+    if (!t) return '';
+    const m = Math.round((Date.now() - t) / 60000);
+    if (m < 2) return 'upravo';
+    if (m < 60) return `prije ${m} min`;
+    const h = Math.round(m / 60);
+    if (h < 24) return `prije ${h} h`;
+    const d = Math.round(h / 24);
+    return d === 1 ? 'jučer' : `prije ${d} dana`;
+  }
+  function friendWhere(f) {
+    const a = f.at;
+    if (!a) return f.seen ? 'Offline · ' + agoText(f.seen) : 'Offline';
+    if (a.where === 'menu') return 'Online';
+    const what = a.kind === 'turnir' ? 'Turnir' : (KIND_NAMES[a.kind] || 'Briškula');
+    return (a.where === 'game' ? 'Igra: ' : 'U sobi: ') + what + ' · ' + modeName(a.kind, a.mode, true);
   }
 
   let room = null;       // trenutni prikaz sobe (lokalne ili online)
@@ -141,6 +223,11 @@
         this.counted = true;
         if (!st.result.draw) this.wins[sideOf(this.kind, this.mode, st.result.winners[0])]++;
         if (this.tour && !this.tour.done) TR.record(this.tour, this.kind, st.result);
+        reportBotGame(this.kind, this.low, st.result.draw ? 'd' : st.result.winners.includes(0) ? 'w' : 'l');
+        if (this.tour && this.tour.done) {
+          const sd = TR.standings(this.tour);
+          reportBotGame('turnir', false, sd.every(x => x.place === 1) ? 'd' : sd.find(x => x.p === 0).place === 1 ? 'w' : 'l');
+        }
       }
       onRoom(this.view());
     }
@@ -187,7 +274,7 @@
       this.ws = ws;
       ws.onopen = () => {
         this.retry = 0; this.ok = true;
-        ws.send(JSON.stringify(Object.assign(profileMsg(), { type: 'hello', token: this.token })));
+        ws.send(JSON.stringify(Object.assign(profileMsg(), { type: 'hello', token: this.token, auth: store.get('auth', null) || undefined })));
         const q = this.q; this.q = []; q.forEach(m => ws.send(JSON.stringify(m)));
         render();
       };
@@ -197,6 +284,11 @@
         else if (m.type === 'room') { if (m.imgs) Object.assign(imgCache, m.imgs); if (ctrl === this) onRoom(m); }
         else if (m.type === 'left') { if (ctrl === this) { room = null; chat.open = false; render(); } }
         else if (m.type === 'error') toast(m.msg);
+        else if (m.type === 'info') toast(m.msg);
+        else if (m.type === 'auth') { store.set('auth', m.token); if (m.fresh) toast('Račun je napravljen. Dobrodošao/la!'); }
+        else if (m.type === 'account') onAccount(m);
+        else if (m.type === 'authError') { acc.err = m.msg; acc.busy = false; if (modal === 'account') render(); else toast(m.msg); }
+        else if (m.type === 'invite') showInvite(m);
       };
       ws.onclose = () => { this.ok = false; if (ctrl === this && room) render(); this.later(); };
     }
@@ -358,6 +450,7 @@
             <button class="ghost small" data-cm="1" aria-label="Više">+</button>
           </div>
         </div>
+        ${window.BRK_OFFLINE ? '' : accountRow()}
       </div>
       <div class="panel">
         <h2>Vrsta igre</h2>
@@ -411,6 +504,7 @@
     }
     $app.querySelector('#rules').onclick = () => { modal = 'rules'; render(); };
     $app.querySelector('#settings').onclick = () => { modal = 'settings'; render(); };
+    bindAccountRow();
     const ib = $app.querySelector('#install');
     if (ib) ib.onclick = async () => { installEvt.prompt(); await installEvt.userChoice; installEvt = null; render(); };
   }
@@ -435,7 +529,7 @@
       <div class="panel" style="text-align:center">
         <div class="muted">Kod sobe</div>
         <div class="code">${esc(r.code)}</div>
-        ${r.isPublic ? '' : '<button id="share" class="ghost small">Pošalji poziv</button>'}
+        <div class="row center-row">${r.isPublic ? '' : '<button id="share" class="ghost small">Pošalji poziv</button>'}${loggedIn() ? `<button id="inviteF" class="ghost small">👥 Pozovi prijatelje${friendCounts().on ? ` <span class="on-n">${friendCounts().on}</span>` : ''}</button>` : ''}</div>
         ${conn ? '' : '<p class="muted">Spajanje na server…</p>'}
       </div>
       <div class="panel">
@@ -446,6 +540,7 @@
           ${r.mode === 4 && r.kind !== 'poker' ? `<span class="tag team${i % 2}">${i % 2 ? 'Par B' : 'Par A'}</span>` : ''}
           ${s && s.bot ? '<span class="tag">bot</span>' : ''}
           ${s && !s.bot && !s.connected ? '<span class="tag">odspojen</span>' : ''}
+          ${s && s.uname && i !== r.you && loggedIn() && !acc.friends.some(f => f.uname === s.uname) ? `<button class="ghost small" data-addf="${esc(s.uname)}" title="Dodaj za prijatelja">+👥</button>` : ''}
           ${(!s || s.bot) && i !== r.you ? `<button class="ghost small" data-seat="${i}">Sjedni ovdje</button>` : ''}
           ${r.host && s && s.bot ? `<button class="ghost small" data-kick="${i}">✕</button>` : ''}
         </li>`).join('')}</ul>
@@ -482,6 +577,8 @@
       try { await navigator.clipboard.writeText(url); toast('Link kopiran'); } catch { toast(url); }
     };
     $app.querySelectorAll('[data-seat]').forEach(b => b.onclick = () => ctrl.send({ type: 'seat', seat: +b.dataset.seat }));
+    $app.querySelectorAll('[data-addf]').forEach(b => b.onclick = () => net.send({ type: 'friendAdd', uname: b.dataset.addf }));
+    const invF = $app.querySelector('#inviteF'); if (invF) invF.onclick = () => { modal = 'friends'; render(); };
     if (r.host) {
       $app.querySelector('#addBot').onclick = () => ctrl.send({ type: 'addBot' });
       $app.querySelector('#start').onclick = () => ctrl.send({ type: 'start', fillBots: true });
@@ -994,6 +1091,136 @@
     return window.confirm(room.local ? 'Prekinuti partiju?' : 'Napustiti igru? Bot će igrati umjesto tebe.');
   }
 
+  // ---------- račun: red u izborniku i prozori ----------
+  function accountRow() {
+    if (!loggedIn()) return `<div class="acc-row guest"><span class="muted">Igraš kao gost</span><button class="small" id="accBtn">Prijava / registracija</button></div>`;
+    const fc = friendCounts();
+    return `<div class="acc-row">
+      <button class="ghost small" id="accBtn" title="Račun">👤 ${esc(acc.user.uname)}</button>
+      <button class="ghost small" id="statsBtn">📊 Statistika</button>
+      <button class="ghost small" id="friendsBtn">👥 Prijatelji${fc.on ? ` <span class="on-n">${fc.on}</span>` : ''}${fc.req ? `<span class="badge">${fc.req}</span>` : ''}</button>
+    </div>`;
+  }
+  function bindAccountRow() {
+    const a = $app.querySelector('#accBtn'); if (a) a.onclick = () => { acc.err = ''; modal = 'account'; render(); };
+    const st = $app.querySelector('#statsBtn'); if (st) st.onclick = () => { modal = 'stats'; net && net.send({ type: 'account' }); render(); };
+    const fr = $app.querySelector('#friendsBtn'); if (fr) fr.onclick = () => { modal = 'friends'; render(); };
+  }
+  const storageNote = () => acc.storage && acc.storage !== 'postgres' ? '<p class="warn">Server još nema spojenu bazu, pa se računi mogu izgubiti kod restarta servera.</p>' : '';
+  function accountHtml() {
+    if (loggedIn()) {
+      const u = acc.user;
+      return `<h2>Moj račun</h2>
+        <div class="acc-head">${avatar({ av: myAv(), name: S.name, cm: S.cm }, 'lg')}<div><b>${esc(S.name || u.name)}</b><div class="muted">korisničko ime: ${esc(u.uname)}</div></div></div>
+        <p class="muted">Ime, avatar i dužina pišulinca spremaju se u račun, pa ih imaš na svakom uređaju gdje se prijaviš. Prijatelji te dodaju po korisničkom imenu.</p>
+        ${storageNote()}
+        <details class="pw"><summary>Promijeni lozinku</summary>
+          <form id="pwForm" class="stack" autocomplete="on">
+            <input type="password" id="pwOld" placeholder="Stara lozinka" autocomplete="current-password">
+            <input type="password" id="pwNew" placeholder="Nova lozinka (barem 6 znakova)" autocomplete="new-password">
+            ${acc.err ? `<p class="err">${esc(acc.err)}</p>` : ''}
+            <button type="submit" class="ghost">Spremi lozinku</button>
+          </form>
+        </details>
+        <div class="row" style="margin-top:12px"><button class="ghost" id="logout">Odjava</button><button id="close">Zatvori</button></div>`;
+    }
+    const reg = acc.tab === 'register';
+    return `<h2>${reg ? 'Registracija' : 'Prijava'}</h2>
+      ${seg('accTab', [['login', 'Prijava'], ['register', 'Novi račun']], acc.tab)}
+      <form id="accForm" class="stack" autocomplete="on">
+        <input id="accUser" maxlength="20" placeholder="Korisničko ime" autocomplete="username" autocapitalize="off" spellcheck="false" value="${esc(acc.lastUser || (reg ? (S.name || '').replace(/\s+/g, '_').replace(/[^\p{L}\p{N}_.-]/gu, '') : ''))}">
+        <input id="accPass" type="password" maxlength="100" placeholder="Lozinka${reg ? ' (barem 6 znakova)' : ''}" autocomplete="${reg ? 'new-password' : 'current-password'}">
+        ${reg ? '<input id="accPass2" type="password" maxlength="100" placeholder="Ponovi lozinku" autocomplete="new-password">' : ''}
+        ${acc.err ? `<p class="err">${esc(acc.err)}</p>` : ''}
+        <button type="submit" ${acc.busy ? 'disabled' : ''}>${reg ? 'Napravi račun' : 'Prijavi se'}</button>
+      </form>
+      <p class="muted">${reg ? 'Račun pamti tvoj profil i statistiku (odigrane partije i pobjede), a možeš dodavati prijatelje i vidjeti tko je online. Ne treba e-mail.' : 'Nemaš račun? Odaberi „Novi račun”. Igrati možeš i bez prijave, kao gost.'}</p>
+      ${storageNote()}
+      <button class="ghost" id="close" style="width:100%">Zatvori</button>`;
+  }
+  function statsHtml() {
+    const st = (acc.user && acc.user.stats) || {};
+    const table = (sec, title) => {
+      const d = st[sec] || {};
+      let tp = 0, tw = 0;
+      const rows = STAT_ROWS.map(([k, n]) => {
+        const x = d[k] || { p: 0, w: 0, d: 0 };
+        tp += x.p; tw += x.w;
+        return `<tr class="${x.p ? '' : 'zero'}"><td>${n}</td><td>${x.p}</td><td>${x.w}</td><td>${x.p ? Math.round(100 * x.w / x.p) + '%' : '–'}</td></tr>`;
+      }).join('');
+      return `<h3>${title}</h3><table class="scores stats"><tr><th>Igra</th><th>Odigrano</th><th>Pobjede</th><th>%</th></tr>${rows}
+        <tr class="tot"><td>Ukupno</td><td>${tp}</td><td>${tw}</td><td>${tp ? Math.round(100 * tw / tp) + '%' : '–'}</td></tr></table>`;
+    };
+    return `<h2>Statistika</h2>
+      <p class="muted" style="text-align:center;margin-top:-4px">${esc(acc.user ? acc.user.uname : '')}</p>
+      ${table('online', 'Online (s drugim igračima)')}
+      ${table('bots', 'Protiv botova')}
+      <p class="muted">Turnir se broji kao jedna partija (pobjeda = prvo mjesto), a njegove igre se broje i pod briškulom, trešetom i pokerom. Tko napusti online partiju prije kraja, upiše mu se poraz.</p>
+      <button id="close" style="width:100%">Zatvori</button>`;
+  }
+  function friendsHtml() {
+    if (!loggedIn()) return `<h2>Prijatelji</h2><p>Za prijatelje treba račun.</p><div class="row"><button class="ghost" id="close">Zatvori</button><button id="toAcc">Prijava / registracija</button></div>`;
+    const inRoom = room && !room.local && room.code;
+    const order = { in: 0, ok: 1, out: 2 };
+    const list = acc.friends.slice().sort((a, b) => order[a.status] - order[b.status] || (!!b.at - !!a.at) || a.name.localeCompare(b.name, 'hr'));
+    const item = f => {
+      let btns = '', sub = '';
+      if (f.status === 'in') { sub = 'želi biti tvoj prijatelj'; btns = `<button class="small" data-facc="${f.id}">Prihvati</button><button class="ghost small" data-frem="${f.id}" aria-label="Odbij">✕</button>`; }
+      else if (f.status === 'out') { sub = 'čeka potvrdu'; btns = `<button class="ghost small" data-frem="${f.id}">Povuci</button>`; }
+      else {
+        sub = friendWhere(f);
+        const here = f.at && inRoom && f.at.code === room.code;
+        if (here) sub = 'U tvojoj sobi';
+        else if (inRoom && f.at) btns += `<button class="small" data-finv="${f.id}">Pozovi</button>`;
+        else if (f.at && f.at.open && f.at.code) btns += `<button class="small" data-fjoin="${esc(f.at.code)}">Pridruži se</button>`;
+        btns += `<button class="ghost small" data-frem="${f.id}" data-fname="${esc(f.name)}" aria-label="Ukloni">✕</button>`;
+      }
+      return `<li class="${f.at ? 'online' : ''}">${avatar({ av: f.av, name: f.name, cm: 0 }, 'md', f.status === 'ok' ? `<span class="pres ${f.at ? 'on' : ''}"></span>` : '')}
+        <span class="n"><b>${esc(f.name)}</b> <span class="muted">${esc(f.uname)}</span><span class="sub">${esc(sub)}</span></span>${btns}</li>`;
+    };
+    return `<h2>Prijatelji</h2>
+      <form id="fAdd" class="row" autocomplete="off"><input id="fName" maxlength="20" placeholder="Korisničko ime prijatelja" autocapitalize="off" spellcheck="false"><button type="submit" style="flex:0 0 auto">Dodaj</button></form>
+      <p class="muted" style="margin:6px 0 10px">Tvoje korisničko ime je <b>${esc(acc.user.uname)}</b>, pošalji ga prijateljima.</p>
+      ${list.length ? `<ul class="seats friends">${list.map(item).join('')}</ul>` : '<p class="muted" style="text-align:center">Još nemaš prijatelja na popisu.</p>'}
+      ${inRoom ? '<p class="muted">Prijatelji koji su online dobit će poziv u tvoju sobu.</p>' : ''}
+      <button id="close" style="width:100%">Zatvori</button>`;
+  }
+  function bindAccountModal(el, refocus) {
+    el.querySelectorAll('[data-seg="accTab"] button').forEach(b => b.onclick = () => { acc.tab = b.dataset.v; acc.err = ''; render(); });
+    const f = el.querySelector('#accForm');
+    if (f) {
+      if (!refocus && window.matchMedia('(min-width: 900px)').matches) (el.querySelector('#accUser').value ? el.querySelector('#accPass') : el.querySelector('#accUser')).focus();
+      f.onsubmit = e => {
+        e.preventDefault();
+        const uname = el.querySelector('#accUser').value.trim(), pass = el.querySelector('#accPass').value;
+        const p2 = el.querySelector('#accPass2');
+        acc.lastUser = uname;
+        if (!uname || !pass) { acc.err = 'Upiši korisničko ime i lozinku.'; return render(); }
+        if (p2 && p2.value !== pass) { acc.err = 'Lozinke se ne podudaraju.'; return render(); }
+        acc.err = ''; acc.busy = true;
+        if (!S.name && acc.tab === 'register') { S.name = uname; save(); }
+        const n = getNet();
+        if (acc.tab === 'register') n.send(profileMsg());
+        n.send({ type: acc.tab === 'register' ? 'register' : 'login', uname, pass });
+        render();
+      };
+    }
+    const lo = el.querySelector('#logout');
+    if (lo) lo.onclick = () => { net && net.send({ type: 'logout' }); store.set('auth', null); acc.user = null; acc.friends = []; modal = null; render(); toast('Odjavljen/a si.'); };
+    const pw = el.querySelector('#pwForm');
+    if (pw) pw.onsubmit = e => { e.preventDefault(); acc.err = ''; net.send({ type: 'password', old: el.querySelector('#pwOld').value, pass: el.querySelector('#pwNew').value }); pw.reset(); };
+    const ta = el.querySelector('#toAcc'); if (ta) ta.onclick = () => { modal = 'account'; render(); };
+    const fa = el.querySelector('#fAdd');
+    if (fa) fa.onsubmit = e => { e.preventDefault(); const v = el.querySelector('#fName').value.trim(); if (v) { net.send({ type: 'friendAdd', uname: v }); el.querySelector('#fName').value = ''; } };
+    el.querySelectorAll('[data-facc]').forEach(b => b.onclick = () => net.send({ type: 'friendAccept', id: +b.dataset.facc }));
+    el.querySelectorAll('[data-frem]').forEach(b => b.onclick = () => {
+      if (b.dataset.fname && !window.confirm('Ukloniti ' + b.dataset.fname + ' s popisa prijatelja?')) return;
+      net.send({ type: 'friendRemove', id: +b.dataset.frem });
+    });
+    el.querySelectorAll('[data-finv]').forEach(b => b.onclick = () => net.send({ type: 'invite', id: +b.dataset.finv }));
+    el.querySelectorAll('[data-fjoin]').forEach(b => b.onclick = () => joinRoomCode(b.dataset.fjoin));
+  }
+
   function renderModal() {
     let el = document.getElementById('overlay');
     let html = '';
@@ -1005,6 +1232,9 @@
       <label class="chk"><input type="checkbox" id="scm" ${S.showCm ? 'checked' : ''}> Prikaži dužinu pišulinca ispod avatara</label>
       <label class="chk"><input type="checkbox" id="snd" ${S.sound ? 'checked' : ''}> Zvukovi</label>
       <div class="row" style="margin-top:12px"><button class="ghost" id="rulesB">Pravila</button><button id="close">Zatvori</button></div>`;
+    else if (modal === 'account') html = accountHtml();
+    else if (modal === 'stats') html = statsHtml();
+    else if (modal === 'friends') html = friendsHtml();
     else if (modal === 'avatar') {
       const tiles = Array.from({ length: AV.N }, (_, i) => `<button class="av-opt ${S.avatar === 'e' + i ? 'on' : ''}" data-av="e${i}" aria-label="Avatar ${i + 1}">${AV.face(i)}</button>`);
       if (S.avatarImg) tiles.unshift(`<button class="av-opt ${S.avatar === 'img' ? 'on' : ''}" data-av="img" aria-label="Moja slika"><img src="${esc(S.avatarImg)}" alt=""></button>`);
@@ -1022,7 +1252,19 @@
     else if (g && g.phase === 'hand') html = g.kind === 'poker' ? pokerHandHtml() : handEndHtml();
     if (!html) { if (el) el.remove(); return; }
     if (!el) { el = document.createElement('div'); el.id = 'overlay'; el.className = 'overlay'; document.body.appendChild(el); }
+    // ako se prozor iscrta ponovno dok se tipka (npr. stigne promjena popisa prijatelja), upisano ostaje
+    const same = el.dataset.modal === String(modal);
+    const keep = same ? [...el.querySelectorAll('input[id]:not([type=checkbox]):not([type=range]):not([type=file])')].map(i => [i.id, i.value]) : [];
+    const focus = same && el.contains(document.activeElement) && document.activeElement.id;
+    const scroll = same && el.querySelector('.modal') ? el.querySelector('.modal').scrollTop : 0;
+    const pwOpen = same && el.querySelector('details.pw[open]');
+    el.dataset.modal = String(modal);
     el.innerHTML = `<div class="modal">${html}</div>`;
+    for (const [id, v] of keep) { const i = el.querySelector('#' + id); if (i && v) i.value = v; }
+    if (pwOpen) { const d = el.querySelector('details.pw'); if (d) d.open = true; }
+    if (scroll) el.querySelector('.modal').scrollTop = scroll;
+    bindAccountModal(el, !!focus);
+    if (focus) { const f = el.querySelector('#' + focus); if (f) f.focus(); }
     const c = el.querySelector('#close'); if (c) c.onclick = () => { modal = null; render(); };
     const sp = el.querySelector('#sp'); if (sp) sp.onchange = () => { S.showPoints = sp.checked; save(); render(); };
     const scm = el.querySelector('#scm'); if (scm) scm.onchange = () => { S.showCm = scm.checked; save(); render(); };
@@ -1169,5 +1411,7 @@
     // ponovno spajanje u igru koja je u tijeku (npr. nakon osvježavanja)
     ctrl = getNet();
   }
-  window.__brk = { get room() { return room; }, get ctrl() { return ctrl; } };
+  // prijavljeni igrač je odmah online (prijatelji vide da je tu)
+  if (!window.BRK_OFFLINE && store.get('auth', null)) getNet();
+  window.__brk = { get room() { return room; }, get ctrl() { return ctrl; }, acc };
 })();

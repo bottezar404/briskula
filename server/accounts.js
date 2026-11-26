@@ -4,13 +4,14 @@
  *                 chips, refills, chipsLast: { d, t, refill } }   (žetoni za poker; chips nema dok se prvi put ne igra)
  *   sess:<hash> { uid, t }   (hash = sha256 tokena; sam token zna samo preglednik)
  *   dm:<a>:<b>  { seq, m: [{ id, f, t, at }], r: { <uid>: id zadnje pročitane } }   (a < b; direktne poruke među prijateljima)
+ *   lobby       { seq, m: [{ id, f, t, at, code? }] }   (grupni chat za sve, zadnjih LOBBY_KEEP poruka)
  */
 'use strict';
 const crypto = require('crypto');
 
 const UNAME_RE = /^[\p{L}\p{N}_.-]{3,20}$/u;
 const PASS_MIN = 6, PASS_MAX = 100, FRIENDS_MAX = 200;
-const DM_KEEP = 200;
+const DM_KEEP = 200, LOBBY_KEEP = 100;
 // žetoni za poker: svaki račun počinje s WALLET_START; partija pokera košta ulog (žetoni za stolom),
 // a nakon partije se na račun vraća ono s čim je igrač završio. Tko padne ispod WALLET_MIN, dobije dopunu do WALLET_MIN.
 const WALLET_START = 5000, WALLET_MIN = 1000; // koliko zadnjih poruka po razgovoru se čuva
@@ -185,6 +186,25 @@ function create(store) {
       if (!d || u.friends[fid] !== 'ok' || (d.r[u.id] || 0) >= d.seq) return 0;
       d.r[u.id] = d.seq; store.put(k, d);
       return d.seq;
+    },
+    // ---------- grupni chat (jedna soba za sve prijavljene) ----------
+    lobbyGet: () => store.get('lobby') || { seq: 0, m: [] },
+    /** dodaj poruku u grupni chat; code = soba u koju poziva (nije obavezno) */
+    lobbyAdd(u, text, code) {
+      const d = store.get('lobby') || { seq: 0, m: [] };
+      const msg = Object.assign({ id: ++d.seq, f: u.id, t: text, at: Date.now() }, code ? { code } : {});
+      d.m.push(msg);
+      if (d.m.length > LOBBY_KEEP) d.m.splice(0, d.m.length - LOBBY_KEEP);
+      store.put('lobby', d);
+      return msg;
+    },
+    /** obriši poruku iz grupnog chata (svoju, ili bilo koju ako je admin) */
+    lobbyDel(u, id, admin) {
+      const d = store.get('lobby');
+      const i = d ? d.m.findIndex(x => x.id === id) : -1;
+      if (i < 0 || (!admin && d.m[i].f !== u.id)) return false;
+      d.m.splice(i, 1); store.put('lobby', d);
+      return true;
     },
     /** broj nepročitanih poruka od prijatelja i vrijeme zadnje poruke */
     dmInfo(uid, fid) {

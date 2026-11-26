@@ -7,7 +7,7 @@
 // test/version.js provjerava da se broj slaže s package.json.
 (function () {
   const NOTES = [
-    { v: '1.20.0', d: '2026-11-26', t: 'Umjesto „Dužine pišulinca” sad se vidi statistika: pobjede, broj partija i koliko si sati odigrao/la (u izborniku, u Statistici i ispod avatara u igri).' },
+    { v: '1.20.0', d: '2026-11-26', t: 'Umjesto „Dužine pišulinca” statistika: pobjede, partije i sati igranja (izbornik, Statistika, ispod avatara).' },
     { v: '1.19.0', d: '2026-11-26', t: 'Kviz: nova pitanja gdje su odgovori slike: zastave država, prometni znakovi, geometrijski likovi i boje karata.' },
     { v: '1.18.2', d: '2026-11-26', t: 'Grupni chat je samo za prijavljene, a gosti na ljestvici kviza umjesto imena vide „Igrač 1”, „Igrač 2”…' },
     { v: '1.18.1', d: '2026-11-26', t: 'Kviz: na mobitelu se tipkovnica više ne zatvara dok upisuješ odgovor (kad netko drugi odgovori ili pošalje emoji).' },

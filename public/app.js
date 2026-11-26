@@ -112,6 +112,7 @@
       profSent = JSON.stringify(profileMsg());
       save();
     }
+    if (m.user) lobbySub(); // prijavljeni odmah vide nove poruke u grupnom chatu (brojka na gumbu)
     if (!was && m.user && modal === 'account') modal = null;
     acc.busy = false;
     if (!room || modal || !room.game || room.game.phase === 'over') render();
@@ -298,7 +299,7 @@
       };
       ws.onmessage = e => {
         const m = JSON.parse(e.data);
-        if (m.type === 'welcome') { this.token = m.token; store.set('token', m.token); }
+        if (m.type === 'welcome') { this.token = m.token; store.set('token', m.token); if (lobby.sub && this.retried) this.send({ type: 'lobbyOpen' }); this.retried = true; }
         else if (m.type === 'room') { if (m.imgs) Object.assign(imgCache, m.imgs); if (ctrl === this) onRoom(m); }
         else if (m.type === 'left') { if (ctrl === this) { room = null; chat.open = false; render(); } }
         else if (m.type === 'error') toast(m.msg);
@@ -308,6 +309,7 @@
         else if (m.type === 'authError') { acc.err = m.msg; acc.busy = false; if (modal === 'account') render(); else toast(m.msg); }
         else if (m.type === 'invite') showInvite(m);
         else if (m.type === 'dm' || m.type === 'dmMsg' || m.type === 'dmSeen' || m.type === 'dmRead') onDm(m);
+        else if (m.type === 'lobby' || m.type === 'lobbyMsg' || m.type === 'lobbyDel' || m.type === 'lobbyWho') onLobby(m);
       };
       ws.onclose = () => { this.ok = false; if (ctrl === this && room) render(); this.later(); };
     }
@@ -379,7 +381,7 @@
   }
   function setChat(open) {
     chat.open = open;
-    if (open) dm.with = null;
+    if (open) { dm.with = null; lobby.open = false; }
     if (open && room) chat.read[room.code] = (room.chat || []).reduce((a, m) => Math.max(a, m.id), 0);
     render();
     if (open && chat.el && window.matchMedia('(min-width: 900px)').matches) chat.el.querySelector('input').focus();
@@ -435,7 +437,7 @@
   function openDm(id) {
     const f = friendById(id);
     if (!f || f.status !== 'ok' || !net) return;
-    dm.with = id; chat.open = false; modal = null; f.unread = 0;
+    dm.with = id; chat.open = false; lobby.open = false; modal = null; f.unread = 0;
     net.send({ type: 'dmOpen', id });
     hideDmNote();
     render();
@@ -491,7 +493,7 @@
     const f = dm.with && loggedIn() && friendById(dm.with);
     const show = !!(f && f.status === 'ok');
     if (show) document.body.classList.add('chat-open');
-    else if (!(chat.open && room && !room.local && room.code)) document.body.classList.remove('chat-open');
+    else if (!(chat.open && room && !room.local && room.code) && !lobbyShown()) document.body.classList.remove('chat-open');
     if (!show) { if (dm.el) dm.el.hidden = true; return; }
     if (!dm.el) {
       const el = dm.el = document.createElement('div');
@@ -540,6 +542,177 @@
   }
   document.addEventListener('visibilitychange', () => { if (dmVisible() && net) { const f = friendById(dm.with); if (f && f.unread) { f.unread = 0; render(); } net.send({ type: 'dmRead', id: dm.with }); } });
 
+  // ---------- grupni chat: jedna soba za sve koji su online ----------
+  // čitati mogu i gosti, pisati prijavljeni; klik na ime: dodaj za prijatelja / poruka / pozovi
+  const LOBBY_MAX = 200;
+  const lobby = { open: false, sub: false, loaded: false, msgs: [], users: {}, who: [], guests: 0, read: +store.get('lobbyRead', 0) || 0, view: 'chat', pick: null, el: null, key: '', fkey: '' };
+  const lobbyShown = () => lobby.open && !window.BRK_OFFLINE && (!room || !room.game);
+  const lobbyUser = id => lobby.users[id] || { id, name: 'Igrač', uname: '', av: 'e0', cm: 0 };
+  function lobbySub() {
+    if (window.BRK_OFFLINE || lobby.sub) return;
+    lobby.sub = true; getNet().send({ type: 'lobbyOpen' });
+  }
+  function lobbyUnread() {
+    const me = acc.user ? acc.user.id : 0;
+    return lobby.msgs.filter(x => x.id > lobby.read && x.f !== me).length;
+  }
+  function lobbyMarkRead() {
+    const last = lobby.msgs.reduce((a, x) => Math.max(a, x.id), 0);
+    if (last > lobby.read) { lobby.read = last; store.set('lobbyRead', last); }
+  }
+  const lobbyBadge = () => { const n = lobbyUnread(); return n ? `<span class="badge">${n > 9 ? '9+' : n}</span>` : ''; };
+  const lobbyOnText = () => lobby.loaded ? (lobby.who.length + lobby.guests) + ' online' : '';
+  // brojke na gumbima (bez ponovnog crtanja izbornika, da se ne izgubi upisani tekst)
+  function lobbyBadges() {
+    document.querySelectorAll('[data-lobbyb]').forEach(el => { el.innerHTML = lobbyBadge(); });
+    document.querySelectorAll('[data-lobbyn]').forEach(el => { el.textContent = lobbyOnText(); });
+  }
+  function setLobby(open) {
+    lobby.open = open; lobby.pick = null;
+    if (open) { chat.open = false; dm.with = null; side.open = false; lobby.view = 'chat'; lobbySub(); lobbyMarkRead(); }
+    render();
+    if (open && lobby.el && loggedIn() && window.matchMedia('(min-width: 900px)').matches) lobby.el.querySelector('#lcIn').focus();
+  }
+  function onLobby(m) {
+    if (m.imgs) Object.assign(imgCache, m.imgs);
+    if (m.users) Object.assign(lobby.users, m.users);
+    if (m.type === 'lobby') {
+      const first = !lobby.loaded;
+      lobby.msgs = m.msgs || []; lobby.who = m.who || []; lobby.guests = m.guests || 0; lobby.loaded = true;
+      // prvi put: stare poruke se ne broje kao nepročitane
+      if (first && !lobby.read) lobbyMarkRead();
+    } else if (m.type === 'lobbyMsg') {
+      if (!lobby.msgs.some(x => x.id === m.msg.id)) lobby.msgs.push(m.msg);
+      if (lobby.msgs.length > 100) lobby.msgs.shift();
+      if (lobbyShown() && document.visibilityState === 'visible') lobbyMarkRead();
+    } else if (m.type === 'lobbyDel') lobby.msgs = lobby.msgs.filter(x => x.id !== m.id);
+    else if (m.type === 'lobbyWho') { lobby.who = m.who || []; lobby.guests = m.guests || 0; }
+    if (lobbyShown()) lobbyMarkRead();
+    renderLobbyChat(); lobbyBadges();
+  }
+  document.addEventListener('visibilitychange', () => { if (lobbyShown() && document.visibilityState === 'visible') { lobbyMarkRead(); lobbyBadges(); } });
+  // soba u koju se može pozvati iz grupnog chata (moja soba, ima slobodno mjesto, još se ne igra)
+  const lobbyRoom = () => room && !room.local && room.code && !room.game && room.seats.some(s => !s || s.bot) ? room : null;
+  function lobbyPickHtml() {
+    const u = lobbyUser(lobby.pick), me = acc.user && acc.user.id === u.id;
+    const f = loggedIn() ? friendById(u.id) : null;
+    const on = lobby.who.includes(u.id);
+    let btns = '';
+    if (me) btns = '<span class="muted">To si ti.</span>';
+    else if (!loggedIn()) btns = '<button class="small" data-lc="login">Prijavi se da dodaš prijatelja</button>';
+    else if (!f) btns = `<button class="small" data-lc="add">+ Dodaj za prijatelja</button>`;
+    else if (f.status === 'out') btns = '<span class="muted">Zahtjev za prijateljstvo je poslan.</span>';
+    else if (f.status === 'in') btns = `<button class="small" data-lc="accept">Prihvati prijateljstvo</button>`;
+    else {
+      btns = `<button class="ghost small" data-lc="dm">💬 Poruka</button>`;
+      if (f.at && f.at.open && f.at.code && !(room && room.code === f.at.code)) btns += `<button class="ghost small" data-lc="join">Pridruži se</button>`;
+      if (f.at && f.at.where !== 'game' && !(room && f.at.code === room.code)) btns += `<button class="small" data-lc="invite">Pozovi u igru</button>`;
+    }
+    return `<div class="lc-pick">
+      <div class="lc-pick-head">${avatar({ av: u.av, name: u.name, cm: u.cm }, 'md', on ? '<span class="pres on"></span>' : '')}
+        <span class="n"><b>${esc(u.name)}</b><span class="muted">${esc(u.uname)}${f && f.status === 'ok' ? ' · prijatelj/ica' : ''}${f && f.status === 'ok' && f.at ? ' · ' + esc(friendWhere(f)) : on ? ' · online' : ''}</span></span>
+        <button class="ghost small" data-lc="unpick" aria-label="Zatvori">✕</button></div>
+      <div class="lc-pick-btns">${btns}</div></div>`;
+  }
+  function lobbyAct(a, b) {
+    const u = lobbyUser(lobby.pick);
+    switch (a) {
+      case 'unpick': lobby.pick = null; break;
+      case 'login': lobby.open = false; modal = 'account'; break;
+      case 'add': net.send({ type: 'friendAdd', uname: u.uname }); lobby.pick = null; break;
+      case 'accept': net.send({ type: 'friendAccept', id: u.id }); lobby.pick = null; break;
+      case 'dm': lobby.open = false; lobby.pick = null; openDm(u.id); return;
+      case 'join': { const f = friendById(u.id); lobby.open = false; lobby.pick = null; if (f && f.at) joinRoomCode(f.at.code); break; }
+      case 'invite':
+        lobby.pick = null;
+        if (room && !room.local && room.code) net.send({ type: 'invite', id: u.id });
+        else { lobby.open = false; inviteFromMenu(u.id); }
+        break;
+      case 'who': lobby.view = lobby.view === 'who' ? 'chat' : 'who'; lobby.pick = null; break;
+      case 'close': setLobby(false); return;
+      case 'del': net.send({ type: 'lobbyDel', id: +b.dataset.id }); return;
+      case 'rjoin': lobby.open = false; joinRoomCode(b.dataset.code); return;
+      case 'room': {
+        const r = lobbyRoom(); if (!r) return;
+        const inp = lobby.el.querySelector('#lcIn');
+        const t = inp.value.replace(/\s+/g, ' ').trim().slice(0, LOBBY_MAX) || ('Tražim igrače: ' + whatName(r.tour ? 'turnir' : r.kind, r.low) + ' · ' + modeName(r.tour ? 'turnir' : r.kind, r.mode, true));
+        net.send({ type: 'lobbySend', text: t, code: r.code }); inp.value = '';
+        return;
+      }
+    }
+    render();
+  }
+  function renderLobbyChat() {
+    const show = lobbyShown();
+    if (show) document.body.classList.add('chat-open');
+    if (!show) { if (lobby.el) lobby.el.hidden = true; return; }
+    if (!lobby.el) {
+      const el = lobby.el = document.createElement('div');
+      el.id = 'lobbyChat'; el.className = 'chat lobby-chat';
+      el.innerHTML = `<div class="chat-head"><b>Grupni chat</b><span class="muted" data-lobbyn></span><button class="ghost small" data-lc="who" id="lcWho" aria-label="Tko je online">👥</button><button class="ghost small" data-lc="close" aria-label="Zatvori">✕</button></div>
+        <div class="chat-list" id="lcList"></div>
+        <div id="lcPick"></div>
+        <form class="chat-form" id="lcForm" autocomplete="off">
+          <input id="lcIn" maxlength="${LOBBY_MAX}" placeholder="Poruka za sve…" enterkeyhint="send">
+          <button type="button" class="ghost" data-lc="room" id="lcRoom" title="Pozovi sve u svoju sobu" aria-label="Pozovi sve u svoju sobu">📣</button>
+          <button type="submit">Pošalji</button>
+        </form>
+        <div class="lc-guest" id="lcGuest"><span class="muted">Čitati mogu svi, a za pisanje se treba prijaviti.</span><button class="small" data-lc="login">Prijava</button></div>`;
+      document.body.appendChild(el);
+      el.onclick = e => {
+        const b = e.target.closest('[data-lc],[data-lu]'); if (!b) return;
+        if (b.dataset.lu) { lobby.pick = +b.dataset.lu; renderLobbyChat(); return; }
+        lobbyAct(b.dataset.lc, b);
+      };
+      el.querySelector('#lcForm').onsubmit = e => {
+        e.preventDefault();
+        const inp = el.querySelector('#lcIn');
+        const t = inp.value.replace(/\s+/g, ' ').trim().slice(0, LOBBY_MAX);
+        if (!t || !net) return;
+        net.send({ type: 'lobbySend', text: t }); inp.value = '';
+      };
+      lobby.key = '';
+    }
+    const el = lobby.el;
+    el.hidden = false;
+    const me = acc.user ? acc.user.id : 0, admin = !!(acc.user && acc.user.lobbyAdmin);
+    el.querySelector('#lcForm').hidden = !loggedIn();
+    el.querySelector('#lcGuest').hidden = loggedIn();
+    el.querySelector('#lcRoom').hidden = !lobbyRoom();
+    el.querySelector('#lcWho').classList.toggle('on', lobby.view === 'who');
+    el.querySelector('#lcPick').innerHTML = lobby.pick ? lobbyPickHtml() : '';
+    el.querySelector('[data-lobbyn]').textContent = lobbyOnText();
+    const list = el.querySelector('#lcList');
+    const ukey = id => { const u = lobbyUser(id); return u.name + u.av; };
+    const key = lobby.view + ':' + lobby.loaded + ':' + me + ':' + admin + ':' + (lobby.view === 'who'
+      ? lobby.who.map(ukey).join(',') + ':' + lobby.guests + ':' + acc.friends.map(f => f.id + f.status).join(',')
+      : lobby.msgs.map(x => x.id + ukey(x.f)).join(','));
+    if (key === lobby.key) return;
+    const switched = !lobby.key.startsWith(lobby.view + ':');
+    lobby.key = key;
+    const atBottom = switched || list.scrollHeight - list.scrollTop - list.clientHeight < 40;
+    if (lobby.view === 'who') {
+      const isF = id => acc.friends.some(f => f.id === id && f.status === 'ok');
+      const ids = lobby.who.slice().sort((a, b) => (b === me) - (a === me) || isF(b) - isF(a) || lobbyUser(a).name.localeCompare(lobbyUser(b).name, 'hr'));
+      list.innerHTML = `<p class="muted lc-who-head">Online: ${lobby.who.length} ${lobby.who.length === 1 ? 'prijavljeni' : 'prijavljenih'}${lobby.guests ? ` i ${lobby.guests} ${lobby.guests === 1 ? 'gost' : 'gostiju'}` : ''}</p>
+        <ul class="lc-who">${ids.map(id => { const u = lobbyUser(id); return `<li><button class="lc-u" data-lu="${id}">${avatar({ av: u.av, name: u.name, cm: 0 }, 'xs', '<span class="pres on"></span>')}<b>${esc(u.name)}</b>${id === me ? ' <span class="muted">(ti)</span>' : isF(id) ? ' <span class="tag">prijatelj</span>' : ''}</button></li>`; }).join('')}</ul>
+        <p class="muted lc-who-head">Klikni na ime da dodaš prijatelja ili pozoveš u igru.</p>`;
+      return;
+    }
+    list.innerHTML = !lobby.loaded ? '<p class="muted chat-empty">Učitavanje…</p>'
+      : lobby.msgs.length ? lobby.msgs.map(x => {
+        const u = lobbyUser(x.f), mine = x.f === me;
+        const del = mine || admin ? `<button class="lc-del" data-lc="del" data-id="${x.id}" aria-label="Obriši poruku" title="Obriši">✕</button>` : '';
+        const join = x.code ? `<button class="small lc-join" data-lc="rjoin" data-code="${esc(x.code)}"${room && room.code === x.code ? ' disabled' : ''}>${room && room.code === x.code ? 'Tvoja soba ' : 'Uđi u sobu '}${esc(x.code)}</button>` : '';
+        return `<div class="msg ${mine ? 'mine' : ''}"><div class="who"><button class="lc-u" data-lu="${u.id}">${avatar({ av: u.av, name: u.name, cm: 0 }, 'xs')}${mine ? 'Ti' : esc(u.name)}</button> <span class="t">${dmTime(x.at)}</span>${del}</div><div class="txt">${esc(x.t)}${join}</div></div>`;
+      }).join('') : '<p class="muted chat-empty">Još nema poruka. Pozdravi sve koji su online!</p>';
+    if (atBottom || (lobby.msgs.length && lobby.msgs[lobby.msgs.length - 1].f === me)) list.scrollTop = list.scrollHeight;
+  }
+  function lobbyBtn(id, cls) {
+    if (window.BRK_OFFLINE) return '';
+    return `<button class="${cls || 'ghost small'} lobby-btn" id="${id}">💬 Grupni chat <span class="muted lb-n" data-lobbyn>${lobbyOnText()}</span><span data-lobbyb>${lobbyBadge()}</span></button>`;
+  }
+
   // ---------- prikaz ----------
   function render() {
     if (!room) renderMenu();
@@ -548,6 +721,7 @@
     renderModal();
     renderChat();
     renderDm();
+    renderLobbyChat();
     renderSideF();
   }
 
@@ -574,6 +748,7 @@
     const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) && !window.navigator.standalone;
     $app.innerHTML = `<div class="menu home">
       <div class="logo"><div class="fan">${fan}</div><h1>Briškula</h1></div>
+      ${lobbyBtn('lobbyBtn', 'ghost lobby-main')}
       <div class="panel profile">
         <h2 class="desk-only">Igrač</h2>
         <div class="prof-row">
@@ -648,6 +823,7 @@
     }
     $app.querySelector('#rules').onclick = () => { modal = 'rules'; render(); };
     $app.querySelector('#settings').onclick = () => { modal = 'settings'; render(); };
+    const lb = $app.querySelector('#lobbyBtn'); if (lb) lb.onclick = () => setLobby(!lobby.open);
     bindNotes($app);
     bindAccountRow();
     const ib = $app.querySelector('#install');
@@ -674,7 +850,7 @@
       <div class="panel" style="text-align:center">
         <div class="muted">Kod sobe</div>
         <div class="code">${esc(r.code)}</div>
-        <div class="row center-row">${r.isPublic ? '' : '<button id="share" class="ghost small">Pošalji poziv</button>'}${loggedIn() ? `<button id="inviteF" class="ghost small">👥 Prijatelji${friendCounts().on ? ` <span class="on-n">${friendCounts().on}</span>` : ''}${friendCounts().msg ? `<span class="badge">${friendCounts().msg}</span>` : ''}</button>` : ''}</div>
+        <div class="row center-row">${r.isPublic ? '' : '<button id="share" class="ghost small">Pošalji poziv</button>'}${lobbyBtn('lobbyBtn2')}${loggedIn() ? `<button id="inviteF" class="ghost small">👥 Prijatelji${friendCounts().on ? ` <span class="on-n">${friendCounts().on}</span>` : ''}${friendCounts().msg ? `<span class="badge">${friendCounts().msg}</span>` : ''}</button>` : ''}</div>
         ${conn ? '' : '<p class="muted">Spajanje na server…</p>'}
       </div>
       <div class="panel">
@@ -718,6 +894,7 @@
     </div>`;
     $app.querySelector('#leave').onclick = leave;
     bindChatBtn();
+    const lb2 = $app.querySelector('#lobbyBtn2'); if (lb2) lb2.onclick = () => setLobby(!lobby.open);
     const sh = $app.querySelector('#share');
     if (sh) sh.onclick = async () => {
       const url = link();
@@ -1572,7 +1749,7 @@
     return what + ' · ' + modeName(k, +S.onMode, true);
   }
   function renderSideF() {
-    const show = !room && loggedIn() && !window.BRK_OFFLINE && !modal && !(dm.with && friendById(dm.with));
+    const show = !room && loggedIn() && !window.BRK_OFFLINE && !modal && !(dm.with && friendById(dm.with)) && !lobbyShown();
     document.body.classList.toggle('side-f', !!show);
     if (!show) { if (side.el) side.el.hidden = true; return; }
     if (!side.el) {

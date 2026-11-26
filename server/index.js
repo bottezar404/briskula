@@ -527,7 +527,7 @@ function accountMsg(u, c, withImg) {
   const fv = friendsView(u, c);
   return {
     type: 'account', storage: ACC.kind,
-    user: Object.assign({ id: u.id, uname: u.uname, name: u.name, av: u.av, cm: u.cm, stats: u.stats, chips: ACC.chipsOf(u), refills: u.refills || 0, chipsLast: u.chipsLast || null }, withImg ? { img: u.img } : {}),
+    user: Object.assign({ id: u.id, uname: u.uname, name: u.name, av: u.av, cm: u.cm, stats: u.stats, chips: ACC.chipsOf(u), refills: u.refills || 0, chipsLast: u.chipsLast || null, lobbyAdmin: isAdmin(u) }, withImg ? { img: u.img } : {}),
     friends: fv.list, imgs: fv.imgs,
   };
 }
@@ -554,6 +554,7 @@ function presenceTick() {
     for (const fid in u.friends) if (u.friends[fid] === 'ok' && online.has(+fid)) notify.add(+fid);
   }
   for (const uid of notify) pushAccount(uid);
+  lobbyWhoTick();
 }
 // direktne poruke: šalju se svim otvorenim vezama korisnika
 function toUser(uid, msg) { for (const t of tokensOf(uid)) { const c = clients.get(t); if (c && c.ws) send(c.ws, msg); } }
@@ -589,6 +590,87 @@ function dmMessage(m, c, ws, u) {
   }
 }
 const DM_MSGS = new Set(['dmOpen', 'dmRead', 'dmSend']);
+
+// ---------- grupni chat: jedna soba za sve koji su online ----------
+// čitati mogu svi (i gosti), pisati samo prijavljeni (ime i avatar dolaze s računa).
+// Poruke se čuvaju u bazi (zadnjih 100). LOBBY_ADMINS = korisnička imena (zarezom) koja smiju brisati tuđe poruke.
+const LOBBY_LEN = 200, LOBBY_GAP = 1500, LOBBY_BURST = 6, LOBBY_WIN = 30000;
+const LOBBY_ADMINS = new Set(String(process.env.LOBBY_ADMINS || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean));
+const isAdmin = u => !!u && LOBBY_ADMINS.has(u.uname.toLowerCase());
+function userCard(uid) {
+  const u = ACC.user(uid);
+  if (!u) return { id: uid, name: 'Igrač', uname: '', av: 'e0', cm: 0 };
+  const av = u.av === 'img' && u.img ? 'i:' + storeImg(u.img) : u.av || AV.forName(u.name || u.uname);
+  return { id: u.id, name: u.name || u.uname, uname: u.uname, av, cm: u.cm || 0 };
+}
+// tko je online: prijavljeni (po računu) + broj gostiju (po vezi)
+function lobbyWho() {
+  const ids = [...online.keys()].filter(isOnline);
+  let guests = 0;
+  for (const c of clients.values()) if (c.ws && !c.uid) guests++;
+  return { who: ids, guests };
+}
+function lobbyUsers(c, ids) {
+  const users = {};
+  for (const id of ids) if (!users[id]) users[id] = userCard(id);
+  const list = Object.values(users);
+  return { users, imgs: newImgs(c, list.map(x => x.av)) };
+}
+const lobbySubs = () => [...clients.values()].filter(c => c.ws && c.lobby);
+function lobbyMessage(m, c, ws) {
+  const err = msg => send(ws, { type: 'error', msg });
+  const u = c.uid ? ACC.user(c.uid) : null;
+  switch (m.type) {
+    case 'lobbyOpen': {
+      c.lobby = true;
+      const d = ACC.lobbyGet(), w = lobbyWho();
+      const ux = lobbyUsers(c, d.m.map(x => x.f).concat(w.who));
+      send(ws, { type: 'lobby', msgs: d.m, who: w.who, guests: w.guests, users: ux.users, imgs: ux.imgs });
+      return;
+    }
+    case 'lobbyClose': c.lobby = false; return;
+    case 'lobbySend': {
+      if (!u) return err('Prijavi se da pišeš u grupni chat.');
+      if (!ACC.isReady()) return err('Chat trenutno nije dostupan, pokušaj za minutu.');
+      const now = Date.now();
+      c.lobbyT = (c.lobbyT || []).filter(t => now - t < LOBBY_WIN);
+      if (now - (c.lastLobby || 0) < LOBBY_GAP || c.lobbyT.length >= LOBBY_BURST) return err('Polako, malo pričekaj.');
+      const text = cleanChat(m.text, LOBBY_LEN);
+      if (!text) return;
+      if (text === c.lobbyLast && now - (c.lastLobby || 0) < 30000) return err('Ista poruka je već poslana.');
+      // poziv u sobu: samo u vlastitu sobu koja ima slobodno mjesto i u kojoj se još ne igra
+      let code = null;
+      if (m.code) {
+        const r = c.room && rooms.get(c.room);
+        if (!r || r.code !== m.code || (r.game && r.game.phase !== 'over') || !r.seats.some(s => !s || s.bot)) return err('Soba nema slobodnih mjesta.');
+        code = r.code;
+      }
+      c.lastLobby = now; c.lobbyLast = text; c.lobbyT.push(now);
+      const msg = ACC.lobbyAdd(u, text, code);
+      for (const sc of lobbySubs()) {
+        const ux = lobbyUsers(sc, [u.id]);
+        send(sc.ws, { type: 'lobbyMsg', msg, users: ux.users, imgs: ux.imgs });
+      }
+      return;
+    }
+    case 'lobbyDel': {
+      if (!u || !ACC.lobbyDel(u, +m.id, isAdmin(u))) return;
+      for (const sc of lobbySubs()) send(sc.ws, { type: 'lobbyDel', id: +m.id });
+      return;
+    }
+  }
+}
+const LOBBY_MSGS = new Set(['lobbyOpen', 'lobbyClose', 'lobbySend', 'lobbyDel']);
+let lastWho = '';
+function lobbyWhoTick() {
+  const w = lobbyWho(), k = JSON.stringify(w);
+  if (k === lastWho) return;
+  lastWho = k;
+  for (const sc of lobbySubs()) {
+    const ux = lobbyUsers(sc, w.who);
+    send(sc.ws, { type: 'lobbyWho', who: w.who, guests: w.guests, users: ux.users, imgs: ux.imgs });
+  }
+}
 const ipOf = req => String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket.remoteAddress || '';
 const STAT_GAP = 8000; // partija protiv botova ne može trajati kraće
 
@@ -681,6 +763,7 @@ wss.on('connection', (ws, req) => {
       const c = old || { room: null };
       c.ws = ws; c.name = clean(m.name) || c.name || 'Igrač';
       c.sentImgs = new Set(); // nova veza: slike treba poslati ponovno
+      c.lobby = false;        // grupni chat: klijent se ponovno pretplati (lobbyOpen)
       setProfile(c, { av: m.av, img: m.img, cm: m.cm });
       clients.set(token, c);
       send(ws, { type: 'welcome', token });
@@ -703,6 +786,7 @@ wss.on('connection', (ws, req) => {
     const c = clients.get(token);
     const r = c.room ? rooms.get(c.room) : null;
     const err = msg => send(ws, { type: 'error', msg });
+    if (LOBBY_MSGS.has(m.type)) return lobbyMessage(m, c, ws);
     if (ACCOUNT_MSGS.has(m.type)) {
       if (!ACC.isReady()) return m.type === 'login' || m.type === 'register' ? send(ws, { type: 'authError', msg: 'Računi trenutno nisu dostupni (baza se spaja). Pokušaj za minutu.' }) : undefined;
       return accountMessage(m, token, c, ws, ip);

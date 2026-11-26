@@ -7,6 +7,8 @@
  *   sess:<hash> { uid, t }   (hash = sha256 tokena; sam token zna samo preglednik)
  *   dm:<a>:<b>  { seq, m: [{ id, f, t, at }], r: { <uid>: id zadnje pročitane } }   (a < b; direktne poruke među prijateljima)
  *   lobby       { seq, m: [{ id, f, t, at, code? }] }   (grupni chat za sve, zadnjih LOBBY_KEEP poruka)
+ *   sug         { seq, m: [{ id, f, u, t, at, done? }], seen }   (kutija za prijedloge; vidi je samo admin,
+ *                 seen = id zadnjeg prijedloga koji je pročitao automatski pregled preko /api/prijedlozi)
  */
 'use strict';
 const crypto = require('crypto');
@@ -15,7 +17,7 @@ const Shop = require('../public/shop.js');
 const UNAME_RE = /^[\p{L}\p{N}_.-]{3,20}$/u;
 const HIST_MAX = 20;
 const PASS_MIN = 6, PASS_MAX = 100, FRIENDS_MAX = 200;
-const DM_KEEP = 200, LOBBY_KEEP = 100;
+const DM_KEEP = 200, LOBBY_KEEP = 100, SUG_KEEP = 500;
 // žetoni za poker: svaki račun počinje s WALLET_START; partija pokera košta ulog (žetoni za stolom),
 // a nakon partije se na račun vraća ono s čim je igrač završio. Tko padne ispod WALLET_MIN, dobije dopunu do WALLET_MIN.
 const WALLET_START = 5000, WALLET_MIN = 1000; // koliko zadnjih poruka po razgovoru se čuva
@@ -352,6 +354,38 @@ function create(store) {
       if (i < 0 || (!admin && d.m[i].f !== u.id)) return false;
       d.m.splice(i, 1); store.put('lobby', d);
       return true;
+    },
+    // ---------- kutija za prijedloge (pišu prijavljeni, čita samo admin) ----------
+    sugGet: () => store.get('sug') || { seq: 0, m: [], seen: 0 },
+    sugAdd(u, text) {
+      const d = api.sugGet();
+      const s = { id: ++d.seq, f: u.id, u: u.uname, t: text, at: Date.now() };
+      d.m.push(s);
+      if (d.m.length > SUG_KEEP) d.m.splice(0, d.m.length - SUG_KEEP);
+      store.put('sug', d);
+      return s;
+    },
+    /** koliko je prijedloga korisnik poslao od trenutka `since` (ms) */
+    sugCount: (u, since) => api.sugGet().m.filter(s => s.f === u.id && s.at >= since).length,
+    sugDel(id) {
+      const d = store.get('sug'), i = d ? d.m.findIndex(s => s.id === id) : -1;
+      if (i < 0) return false;
+      d.m.splice(i, 1); store.put('sug', d);
+      return true;
+    },
+    sugDone(id, done) {
+      const d = store.get('sug'), s = d && d.m.find(x => x.id === id);
+      if (!s) return false;
+      if (done) s.done = 1; else delete s.done;
+      store.put('sug', d);
+      return true;
+    },
+    /** automatski pregled: zapamti do kojeg je prijedloga stigao */
+    sugSeen(id) {
+      const d = api.sugGet();
+      d.seen = Math.max(0, Math.min(d.seq, Math.floor(+id) || 0));
+      store.put('sug', d);
+      return d.seen;
     },
     /** broj nepročitanih poruka od prijatelja i vrijeme zadnje poruke */
     dmInfo(uid, fid) {

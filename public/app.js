@@ -358,7 +358,7 @@
         if (m.type === 'welcome') { this.token = m.token; store.set('token', m.token); }
         else if (m.type === 'room') { if (m.imgs) Object.assign(imgCache, m.imgs); if (ctrl === this) onRoom(m); }
         else if (m.type === 'left') { if (ctrl === this) { room = null; chat.open = false; render(); } }
-        else if (m.type === 'error') toast(m.msg);
+        else if (m.type === 'error') { sug.busy = false; toast(m.msg); }
         else if (m.type === 'info') toast(m.msg);
         else if (m.type === 'auth') { store.set('auth', m.token); if (m.fresh) toast('Račun je napravljen. Dobrodošao/la!'); }
         else if (m.type === 'account') onAccount(m);
@@ -368,6 +368,8 @@
         else if (m.type === 'game') { acc.game = m.game; if (modal === 'history') render(); }
         else if (m.type === 'userInfo') { if (m.imgs) Object.assign(imgCache, m.imgs); acc.prof = m.user; if (modal === 'profile') render(); }
         else if (m.type === 'adminReset') { acc.reset = m; if (modal === 'account') render(); }
+        else if (m.type === 'sugList') { sug.list = m.list; if (acc.user) acc.user.sugN = m.list.filter(x => !x.done).length; if (modal === 'sug' || !room) render(); }
+        else if (m.type === 'sugOk') { sug.sent = true; sug.busy = false; sug.draft = ''; if (modal === 'sug') render(); toast('Hvala na prijedlogu!'); }
         else if (m.type === 'kvList') { kvRooms = m.rooms || []; kvListPaint(); }
         else if (m.type === 'kvTop') { if (m.imgs) Object.assign(imgCache, m.imgs); kvTop = m; kvTopPaint(); }
         else if (m.type === 'dm' || m.type === 'dmMsg' || m.type === 'dmSeen' || m.type === 'dmRead') onDm(m);
@@ -854,8 +856,10 @@
         ${installEvt ? '<button class="small" id="install">Instaliraj aplikaciju</button>' : ''}
       </div>
       ${isIOS ? '<p class="muted" style="text-align:center">Na iPhoneu: Podijeli → „Dodaj na početni zaslon” za aplikaciju.</p>' : ''}
+      ${sugLine()}
       ${verLine()}
     </div>`;
+    bindSugLine($app);
     const nameEl = $app.querySelector('#name');
     nameEl.oninput = () => { S.name = nameEl.value.trim(); save(); };
     $app.querySelector('#avBtn').onclick = () => { modal = 'avatar'; render(); };
@@ -2460,6 +2464,59 @@
     const pd = el.querySelector('#profDm'); if (pd) pd.onclick = () => { modal = null; render(); openDm(+pd.dataset.id); };
   }
 
+  // ---------- kutija za prijedloge: pišu prijavljeni, popis vidi samo admin ----------
+  const sug = { list: null, sent: false, busy: false, draft: '' };
+  function sugLine() {
+    const u = acc.user, n = u && u.admin ? u.sugN || 0 : 0;
+    return `<p class="ver sugline"><button class="linkish" id="sugBtn">💡 ${u && u.admin ? 'Prijedlozi' + (n ? ` (${n})` : '') : 'Imaš prijedlog? Napiši nam'}</button></p>`;
+  }
+  function bindSugLine(root) {
+    const b = root.querySelector('#sugBtn');
+    if (b) b.onclick = () => { sug.sent = false; modal = 'sug'; if (acc.user && acc.user.admin && net) net.send({ type: 'sugList' }); render(); };
+  }
+  function sugHtml() {
+    const u = acc.user;
+    if (!u) return `<h2>💡 Kutija za prijedloge</h2>
+      <p>Imaš ideju što bi se još moglo napraviti (nova igra, mogućnost, popravak)? Prijedloge mogu slati prijavljeni igrači.</p>
+      <div class="row"><button id="sugLogin">Prijava / novi račun</button><button class="ghost" id="close">Zatvori</button></div>`;
+    const form = sug.sent
+      ? `<p class="okbox">Hvala! Prijedlog je poslan. Pročitat ćemo ga.</p><div class="row"><button class="ghost" id="sugMore">Pošalji još jedan</button><button id="close">Zatvori</button></div>`
+      : `<form id="sugForm" class="stack">
+          <textarea id="sugText" maxlength="1000" rows="5" placeholder="Npr. dodajte igru Belot, ili da se u sobi može…">${esc(sug.draft)}</textarea>
+          <p class="muted" style="margin:0">Prijedlog vidi samo admin. Do 1000 znakova.</p>
+          <div class="row"><button type="submit" ${sug.busy ? 'disabled' : ''}>Pošalji</button><button type="button" class="ghost" id="close">Zatvori</button></div>
+        </form>`;
+    let adm = '';
+    if (u.admin) {
+      const L = sug.list;
+      const dt = t => new Date(t).toLocaleString('hr-HR', { day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit' });
+      adm = `<h3 style="margin:18px 0 6px">Primljeni prijedlozi</h3>
+        ${!L ? '<p class="muted">Učitavam…</p>' : !L.length ? '<p class="muted">Još nema prijedloga.</p>' : `<ul class="sug-list">${L.map(x => `<li class="${x.done ? 'done' : ''}">
+          <div class="muted"><b>${esc(x.uname)}</b> · ${dt(x.at)} · #${x.id}</div>
+          <div class="sug-t">${esc(x.text)}</div>
+          <div class="row"><button class="ghost small" data-sdone="${x.id}" data-v="${x.done ? 0 : 1}">${x.done ? '↩ Vrati' : '✓ Riješeno'}</button><button class="ghost small" data-sdel="${x.id}">🗑 Obriši</button></div>
+        </li>`).join('')}</ul>`}`;
+    }
+    return `<h2>💡 Kutija za prijedloge</h2>
+      <p class="muted" style="margin-top:0">Što bi se još moglo napraviti ili popraviti? Napiši ideju.</p>
+      ${form}${adm}`;
+  }
+  function bindSug(el) {
+    const f = el.querySelector('#sugForm'), ta = el.querySelector('#sugText');
+    if (ta) ta.oninput = () => { sug.draft = ta.value; };
+    if (f) f.onsubmit = e => {
+      e.preventDefault();
+      const t = ta.value.trim();
+      if (t.length < 5) return toast('Napiši malo više.');
+      if (!net) return toast('Nema veze sa serverom.');
+      sug.busy = true; net.send({ type: 'sugSend', text: t }); render();
+    };
+    const more = el.querySelector('#sugMore'); if (more) more.onclick = () => { sug.sent = false; render(); };
+    const lg = el.querySelector('#sugLogin'); if (lg) lg.onclick = () => { acc.err = ''; modal = 'account'; render(); };
+    el.querySelectorAll('[data-sdone]').forEach(b => b.onclick = () => net.send({ type: 'sugDone', id: +b.dataset.sdone, done: b.dataset.v === '1' }));
+    el.querySelectorAll('[data-sdel]').forEach(b => b.onclick = () => { if (window.confirm('Obrisati prijedlog #' + b.dataset.sdel + '?')) net.send({ type: 'sugDel', id: +b.dataset.sdel }); });
+  }
+
   // broj verzije + "Što je novo" (public/version.js)
   const VER = window.BRK_VER || { VERSION: '', NOTES: [] };
   function verLine() {
@@ -2488,6 +2545,7 @@
       <div class="row" style="margin-top:12px"><button class="ghost" id="rulesB">Pravila</button><button id="close">Zatvori</button></div>
       ${verLine()}`;
     else if (modal === 'notes') html = notesHtml();
+    else if (modal === 'sug') html = sugHtml();
     else if (modal === 'account') html = accountHtml();
     else if (modal === 'stats') html = statsHtml();
     else if (modal === 'profile') html = profileHtml();
@@ -2526,6 +2584,7 @@
     if (scroll) el.querySelector('.modal').scrollTop = scroll;
     bindAccountModal(el, !!focus);
     if (modal === 'shop') bindShop(el);
+    if (modal === 'sug') bindSug(el);
     if (focus) { const f = el.querySelector('#' + focus); if (f) f.focus(); }
     const c = el.querySelector('#close'); if (c) c.onclick = () => { modal = null; render(); };
     const sp = el.querySelector('#sp'); if (sp) sp.onchange = () => { S.showPoints = sp.checked; save(); render(); };

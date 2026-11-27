@@ -122,7 +122,13 @@
     const dl = m.user && m.user.dukLast;
     if (dl && dl.t > (store.get('dukSeen', 0) || 0)) {
       store.set('dukSeen', dl.t);
-      if (Date.now() - dl.t < 60000) setTimeout(() => toast(`+${dl.n} ${SH.cur(dl.n)} · ${dl.why}`), was ? 600 : 1500);
+      if (Date.now() - dl.t < 60000 && !(m.user.kvWin && m.user.kvWin.t === dl.t)) setTimeout(() => toast(`+${dl.n} ${SH.cur(dl.n)} · ${dl.why}`), was ? 600 : 1500);
+    }
+    // dnevna nagrada kviza: čestitka kod sljedećeg otvaranja (jednom, najviše 3 dana poslije)
+    const kw = m.user && m.user.kvWin;
+    if (kw && kw.t > (store.get('kvWinSeen', 0) || 0)) {
+      store.set('kvWinSeen', kw.t);
+      if (Date.now() - kw.t < 3 * 86400e3) setTimeout(() => { beep(880, .15); toast(`🏆 Čestitamo! Bio/la si prvi/a na dnevnoj ljestvici kviza (${kw.d.split('-').reverse().join('.')}.) i dobivaš ${kw.n} ${SH.cur(kw.n)}!`, 7000); }, was ? 600 : 1800);
     }
     applyTheme();
     if (!was !== !m.user) kvTopAt = 0; // prijava/odjava: ljestvicu treba osvježiti (gost ↔ račun)
@@ -209,10 +215,10 @@
   let modal = null;      // 'rules' | 'last' | 'settings' | null
   let installEvt = null;
 
-  function toast(t) {
+  function toast(t, ms) {
     const el = document.getElementById('toast');
     el.textContent = t; el.classList.add('show');
-    clearTimeout(toast.t); toast.t = setTimeout(() => el.classList.remove('show'), 2600);
+    clearTimeout(toast.t); toast.t = setTimeout(() => el.classList.remove('show'), ms || 2600);
   }
 
   // ---------- zvuk ----------
@@ -1845,16 +1851,24 @@
     getNet().send({ type: 'kvTop', cat: kvTopCat || null });
   }
   function kvTopHtml() {
-    const cats = [['', 'Ukupno']].concat(KV.CATS.map(c => [c.id, c.icon]));
-    const tabs = `<div class="kv-tabs">${cats.map(([id, t]) => `<button class="${id === kvTopCat ? 'on' : ''}" data-kvtop="${id}" title="${id ? esc(KV.catOf(id).name) : 'Svi kvizovi'}">${t}</button>`).join('')}</div>`;
+    const cats = [['', 'Ukupno'], ['day', 'Danas']].concat(KV.CATS.map(c => [c.id, c.icon]));
+    const tip = id => id === 'day' ? 'Današnji bodovi (prvi u ponoć dobiva dukate)' : id ? KV.catOf(id).name : 'Svi kvizovi';
+    const tabs = `<div class="kv-tabs">${cats.map(([id, t]) => `<button class="${id === kvTopCat ? 'on' : ''}${!id || id === 'day' ? ' txt' : ''}" data-kvtop="${id}" title="${esc(tip(id))}">${t}</button>`).join('')}</div>`;
+    const day = kvTopCat === 'day';
     const t = kvTop && (kvTop.cat || '') === kvTopCat ? kvTop : null;
     const row = x => `<li class="${x.me ? 'mine' : ''}"><span class="kv-tr">${['🥇', '🥈', '🥉'][x.rank - 1] || x.rank + '.'}</span>${avatar({ av: x.av, name: x.name }, 'xs')}<span class="kv-tn">${esc(x.name)}</span><b>${kvPts(x.pts)}</b></li>`;
     let body = '<p class="muted">Učitavanje…</p>';
     if (t) {
-      body = t.top.length ? `<ol class="kv-board">${t.top.map(row).join('')}${t.me && t.me.rank > t.top.length ? `<li class="gap">…</li>${row(t.me)}` : ''}</ol>` : '<p class="muted">Još nitko nema bodova. Budi prvi/a!</p>';
-      body += `<p class="muted kv-tnote">${t.guest ? 'Imena na ljestvici vide samo prijavljeni. Prijavi se da vidiš tko je gdje i da ti se bodovi iz kvizova skupljaju na računu.' : acc.user && acc.user.kviz ? `Tvoji bodovi: <b>${kvPts(kvTopCat ? ((acc.user.kviz.cats || {})[kvTopCat] || {}).pts : acc.user.kviz.pts)}</b> · ulazi i izlazi iz soba, bodovi ostaju.` : ''}</p>`;
+      body = t.top.length ? `<ol class="kv-board">${t.top.map(row).join('')}${t.me && t.me.rank > t.top.length ? `<li class="gap">…</li>${row(t.me)}` : ''}</ol>` : `<p class="muted">${day ? 'Danas još nitko nema bodova. Budi prvi/a!' : 'Još nitko nema bodova. Budi prvi/a!'}</p>`;
+      if (day) {
+        const pr = t.prize || SH.EARN.kvizDay, l = t.last;
+        body = `<p class="kv-prize">🎁 Tko je u ponoć prvi na današnjoj ljestvici, dobiva <b>${pr} ${SH.cur(pr)}</b>.</p>` + body;
+        if (l) body += `<p class="muted kv-tnote">Zadnji dobitnik (${esc(l.d.split('-').reverse().join('.'))}.): <b>${l.me ? 'ti' : l.name ? esc(l.name) : 'prijavi se da vidiš tko'}</b> · ${kvPts(l.pts)} bodova</p>`;
+      }
+      const mine = !acc.user || !acc.user.kviz ? 0 : day ? (t.me ? t.me.pts : 0) : kvTopCat ? ((acc.user.kviz.cats || {})[kvTopCat] || {}).pts : acc.user.kviz.pts;
+      body += `<p class="muted kv-tnote">${t.guest ? 'Imena na ljestvici vide samo prijavljeni. Prijavi se da vidiš tko je gdje i da ti se bodovi iz kvizova skupljaju na računu.' : acc.user && acc.user.kviz ? `Tvoji bodovi${day ? ' danas' : ''}: <b>${kvPts(mine)}</b> · ulazi i izlazi iz soba, bodovi ostaju.` : ''}</p>`;
     }
-    return `<div class="kv-th">🏆 Ljestvica bodova${kvTopCat ? ' · ' + esc(KV.catOf(kvTopCat).name) : ''}</div>${tabs}${body}`;
+    return `<div class="kv-th">🏆 Ljestvica bodova${day ? ' · Danas' : kvTopCat ? ' · ' + esc(KV.catOf(kvTopCat).name) : ''}</div>${tabs}${body}`;
   }
   function kvTopPaint() {
     const el = document.getElementById('kvTop');

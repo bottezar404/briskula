@@ -962,8 +962,9 @@ ul.notes li div { margin-top: 2px; }
 /* kviz: ljestvica skupljenih bodova */
 .kv-top { margin-top: 12px; padding: 10px; border-radius: 12px; background: rgba(0,0,0,.18); }
 .kv-th { font-weight: 800; color: var(--gold); margin-bottom: 6px; }
-.kv-tabs { display: grid; grid-template-columns: 2.2fr repeat(8, minmax(0, 1fr)); gap: 3px; margin-bottom: 8px; }
+.kv-tabs { display: grid; grid-template-columns: auto auto repeat(8, minmax(0, 1fr)); gap: 3px; margin-bottom: 8px; }
 .kv-tabs button { padding: 5px 0; min-width: 0; font-size: 13px; overflow: hidden; border-radius: 8px; background: rgba(255,255,255,.1); color: var(--cream); box-shadow: none; }
+.kv-tabs button.txt { padding: 5px 7px; font-size: 12px; }
 .kv-tabs button.on { background: var(--gold); color: var(--ink); font-weight: 800; }
 .kv-board { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 3px; }
 .kv-board li { display: flex; align-items: center; gap: 7px; padding: 4px 8px; border-radius: 9px; background: rgba(255,255,255,.06); min-width: 0; }
@@ -974,6 +975,7 @@ ul.notes li div { margin-top: 2px; }
 .kv-tn { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .kv-board b { font-variant-numeric: tabular-nums; }
 .kv-tnote { margin: 8px 0 0; font-size: 13px; }
+.kv-prize { margin: 0 0 8px; font-size: 13px; padding: 6px 8px; border-radius: 8px; background: rgba(240,200,90,.14); }
 .kv-tot { color: var(--gold); font-weight: 800; white-space: nowrap; }
 
 /* ---------- dukati i trgovina ---------- */

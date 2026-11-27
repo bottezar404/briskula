@@ -7,6 +7,7 @@
  *   sess:<hash> { uid, t }   (hash = sha256 tokena; sam token zna samo preglednik)
  *   dm:<a>:<b>  { seq, m: [{ id, f, t, at }], r: { <uid>: id zadnje pročitane } }   (a < b; direktne poruke među prijateljima)
  *   lobby       { seq, m: [{ id, f, t, at, code? }] }   (grupni chat za sve, zadnjih LOBBY_KEEP poruka)
+ *   kvDaily     { d, hist: [{ d, uid, pts }] }   (dnevna nagrada kviza: d = zadnji obračunati dan, hist = zadnjih 30 pobjednika)
  *   sug         { seq, m: [{ id, f, u, t, at, done? }], seen }   (kutija za prijedloge; vidi je samo admin,
  *                 seen = id zadnjeg prijedloga koji je pročitao automatski pregled preko /api/prijedlozi)
  */
@@ -28,6 +29,8 @@ const statKey = (kind, low) => kind === 'poker' || kind === 'turnir' || kind ===
 
 // datum po hrvatskom vremenu (dnevni bonus i granica za botove kreću u ponoć)
 const today = () => { try { return new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Zagreb' }); } catch { return new Date().toISOString().slice(0, 10); } };
+// dnevna ljestvica: više bodova, kod istog broja prednost ima tko je do njih stigao prije
+const kvDayCmp = val => (a, b) => val(b) - val(a) || (a.kviz.day.at || 0) - (b.kviz.day.at || 0) || a.id - b.id;
 const sha = s => crypto.createHash('sha256').update(s).digest('hex');
 function hashPass(pass) {
   const salt = crypto.randomBytes(16).toString('hex');
@@ -175,7 +178,11 @@ function create(store) {
     addKviz(u, pts, cat, ok) {
       pts = Math.max(0, Math.round(+pts || 0));
       if (!u.kviz) { u.kviz = { pts: 0, ok: 0, n: 0, cats: {} }; kvTop = null; }
-      const k = u.kviz;
+      const k = u.kviz, day = today();
+      if (!k.pts && pts) kvTop = null; // prvi bodovi: korisnik ulazi na ljestvicu
+      // dnevni bodovi: prije prelaska na novi dan obračunaj nagradu za prošli (da se ne izgube njegovi bodovi)
+      if (pts && (!k.day || k.day.d !== day)) { api.kvDailySettle(); k.day = { d: day, pts: 0, at: 0 }; }
+      if (pts) { k.day.pts += pts; k.day.at = Date.now(); }
       k.pts += pts; k.n++;
       if (ok) k.ok++;
       if (cat && /^[a-z]{2,8}$/.test(cat)) {
@@ -199,12 +206,47 @@ function create(store) {
         kvTop = [];
         for (const [k, u] of store.docs) if (k.startsWith('user:') && u.kviz && u.kviz.pts > 0) kvTop.push(u);
       }
-      const val = u => (cat ? (u.kviz.cats[cat] || {}).pts || 0 : u.kviz.pts);
-      const all = kvTop.filter(u => val(u) > 0).sort((a, b) => val(b) - val(a) || a.id - b.id);
+      // cat 'day' = današnji bodovi (dnevna ljestvica, za nagradu u ponoć)
+      const d = today();
+      const val = cat === 'day' ? u => (u.kviz.day && u.kviz.day.d === d ? u.kviz.day.pts : 0) : u => (cat ? (u.kviz.cats[cat] || {}).pts || 0 : u.kviz.pts);
+      const all = kvTop.filter(u => val(u) > 0).sort(cat === 'day' ? kvDayCmp(val) : (a, b) => val(b) - val(a) || a.id - b.id);
       const row = (u, i) => ({ u, pts: val(u), rank: i + 1 });
       const mi = me ? all.findIndex(u => u.id === me.id) : -1;
       return { top: all.slice(0, n).map(row), me: mi >= 0 ? row(all[mi], mi) : null, players: all.length };
     },
+    /**
+     * Dnevna nagrada kviza: tko je završio dan (ponoć po hrvatskom vremenu) s najviše kviz bodova toga dana
+     * dobije Shop.EARN.kvizDay dukata. Svaki dan se obračunava samo jednom (kvDaily.d), pa se može zvati
+     * koliko god često: nakon buđenja servera nadoknadi propuštene dane. Vraća popis novih dodjela.
+     */
+    kvDailySettle() {
+      const d = today(), doc = store.get('kvDaily') || { d: '', hist: [] };
+      const byDay = new Map(); // dan -> korisnici s bodovima tog dana
+      for (const [k, u] of store.docs) {
+        const x = k.startsWith('user:') && u.kviz && u.kviz.day;
+        if (!x || !(x.pts > 0) || x.d >= d || x.d <= doc.d) continue;
+        if (!byDay.has(x.d)) byDay.set(x.d, []);
+        byDay.get(x.d).push(u);
+      }
+      if (!byDay.size) return [];
+      const won = [];
+      for (const day of [...byDay.keys()].sort()) {
+        const val = u => u.kviz.day.pts;
+        const w = byDay.get(day).sort(kvDayCmp(val))[0];
+        const n = api.addDuk(w, Shop.EARN.kvizDay, 'prvo mjesto na dnevnoj ljestvici kviza');
+        w.kvWin = { d: day, pts: val(w), n, t: Date.now() };
+        save(w);
+        doc.hist.push({ d: day, uid: w.id, pts: val(w) });
+        doc.d = day;
+        won.push({ u: w, d: day, pts: val(w), n });
+      }
+      doc.hist = doc.hist.slice(-30);
+      store.put('kvDaily', doc);
+      for (const x of won) if (api.onKvDaily) try { api.onKvDaily(x); } catch (e) { console.error(e); }
+      return won;
+    },
+    /** zadnji dobitnik dnevne nagrade kviza ({ d, uid, pts } ili null) */
+    kvDailyLast: () => { const h = (store.get('kvDaily') || {}).hist || []; return h[h.length - 1] || null; },
 
     // ---------- žetoni (poker) ----------
     chipsOf: u => (u && Number.isFinite(u.chips) ? u.chips : WALLET_START),

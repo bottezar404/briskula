@@ -2134,7 +2134,7 @@
         <ul class="sh-earn">
           <li>Online pobjeda: <b>${E$.onlineWin}</b>, neriješeno ${E$.onlineDraw}, poraz ${E$.onlineLoss} (ako odigraš do kraja)</li>
           <li>Pobjeda u online turniru: još <b>+${E$.tourWin}</b></li>
-          <li>Online kviz (krug u sobi): pobjeda ${E$.kvizWin}, sudjelovanje ${E$.kvizPlay}</li>
+          <li>Online kviz (krug u sobi): pobjeda ${E$.kvizWin}, sudjelovanje ${E$.kvizPlay}; sam/a u sobi: ${E$.botWin.normal} za barem pola točnih, inače ${E$.botLoss} (ulazi u dnevnu granicu za botove)</li>
           <li>Protiv botova: pobjeda ${E$.botWin.easy} / ${E$.botWin.normal} / ${E$.botWin.hard} (lako / srednje / teško), poraz ${E$.botLoss}, najviše ${E$.botDay} na dan</li>
           <li>Dnevni bonus: <b>${E$.daily}</b> za prvu prijavu u danu</li>
         </ul>

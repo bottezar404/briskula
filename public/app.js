@@ -85,12 +85,13 @@
   }
   const fmtTime = ms => { const m = Math.floor((+ms || 0) / 60000); return m < 60 ? m + ' min' : Math.floor(m / 60) + ' h' + (m % 60 ? ' ' + (m % 60) + ' min' : ''); };
   const fmtHours = ms => { const h = (+ms || 0) / 3600e3; return h < 1 ? fmtTime(ms) : (h < 10 ? h.toFixed(1).replace('.', ',') : Math.round(h)) + ' h'; };
+  const fmtShort = ms => { const m = Math.floor((+ms || 0) / 60000); return m < 60 ? m + 'm' : Math.round(m / 60) + 'h'; }; // kratko, za pločicu ispod avatara
   const stTitle = st => `Pobjeda: ${st.w} · Partija: ${st.p} · Odigrano: ${fmtTime(st.t)}`;
   // avatar u igri s pločicom ispod: broj pobjeda (prijavljeni), "bot" ili "gost"
   function avWrap(who, cls, extra) {
     if (!S.showSt) return avatar(who, cls, extra);
     const lab = who.bot ? '<span class="cml secret">bot</span>'
-      : who.st ? `<span class="cml" title="${stTitle(who.st)}">🏆 ${who.st.w}</span>`
+      : who.st ? `<span class="cml" title="${stTitle(who.st)}">🏆 ${who.st.w} · ⏱ ${fmtShort(who.st.t)}</span>`
       : '<span class="cml secret" title="Gost (nije prijavljen)">gost</span>';
     return `<span class="avw">${avatar(who, cls, extra)}${lab}</span>`;
   }
@@ -332,7 +333,7 @@
     leave() {
       clearTimeout(this.timer); this.kvStop();
       // poker napušten prije kraja: ulog je izgubljen (kao i online)
-      if (this.kind === 'poker' && this.st.phase !== 'over' && !this.counted) { this.counted = true; reportBotGame('poker', false, 'l', this.mode, this.level); }
+      if (this.kind === 'poker' && this.st.phase !== 'over' && !this.counted) { this.counted = true; reportBotGame('poker', false, 'l', this.mode, Date.now() - this.t0, this.level); }
     }
   }
 
@@ -355,7 +356,11 @@
       };
       ws.onmessage = e => {
         const m = JSON.parse(e.data);
-        if (m.type === 'welcome') { this.token = m.token; store.set('token', m.token); }
+        if (m.type === 'welcome') {
+          this.token = m.token; store.set('token', m.token);
+          // ponovno spajanje usred partije protiv botova: server opet zna da igram (prijatelji, sati igranja)
+          if (ctrl instanceof LocalGame && room && loggedIn()) this.send({ type: 'botGame', kind: ctrl.kind, low: ctrl.low, mode: ctrl.mode, ago: Date.now() - ctrl.t0 });
+        }
         else if (m.type === 'room') { if (m.imgs) Object.assign(imgCache, m.imgs); if (ctrl === this) onRoom(m); }
         else if (m.type === 'left') { if (ctrl === this) { room = null; chat.open = false; render(); } }
         else if (m.type === 'error') { sug.busy = false; toast(m.msg); }
@@ -2152,6 +2157,7 @@
   function openProfile(uname) {
     if (!loggedIn() || !net) { toast('Prijavi se da vidiš profile igrača.'); return; }
     if (lobby.open) setLobby(false);
+    if (side.open) side.open = false; // ladica s online prijateljima (mobitel)
     acc.prof = null; modal = 'profile';
     net.send({ type: 'userInfo', uname });
     render();
@@ -2260,7 +2266,7 @@
     const on = ok.filter(f => f.at).sort((a, b) => (a.at.where === 'game') - (b.at.where === 'game') || a.name.localeCompare(b.name, 'hr'));
     const req = acc.friends.filter(f => f.status === 'in').length;
     const unread = ok.reduce((a, f) => a + (f.unread || 0), 0);
-    const key = JSON.stringify([side.open, sideWhat(), req, unread, ok.length, on.map(f => [f.id, f.name, f.av, f.at, f.unread])]);
+    const key = JSON.stringify([side.open, sideWhat(), req, unread, ok.length, on.map(f => [f.id, f.name, f.av, f.at, f.unread, f.st])]);
     side.el.hidden = false;
     side.el.classList.toggle('open', side.open);
     if (key === side.key) return;
@@ -2271,7 +2277,7 @@
       if (f.at.open && f.at.code) btn = `<button class="ghost small" data-sjoin="${esc(f.at.code)}" title="Uđi u njegovu/njezinu sobu">Pridruži se</button>`;
       if (!busy) btn += `<button class="small" data-sinv="${f.id}">Pozovi</button>`;
       return `<li class="${busy ? 'busy' : ''}">${avatar({ av: f.av, name: f.name, cos: f.cos }, 'md', '<span class="pres on"></span>')}
-        <span class="n"><b>${esc(f.name)}</b><span class="sub">${esc(friendWhere(f))}</span></span>
+        <span class="n prof-link" data-prof="${esc(f.uname)}"><b>${esc(f.name)}</b>${f.st ? `<span class="fst" title="${stTitle(f.st)}">🏆 ${f.st.w} · ⏱ ${fmtHours(f.st.t)}</span>` : ''}<span class="sub">${esc(friendWhere(f))}</span></span>
         <span class="sf-btns"><button class="ghost small msg-btn" data-smsg="${f.id}" aria-label="Poruka">💬${f.unread ? `<span class="badge">${f.unread > 9 ? '9+' : f.unread}</span>` : ''}</button>${btn}</span></li>`;
     };
     const tabBadge = req + unread ? `<span class="badge">${req + unread > 9 ? '9+' : req + unread}</span>` : '';

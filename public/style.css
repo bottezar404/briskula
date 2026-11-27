@@ -601,6 +601,7 @@ details.pw summary { cursor: pointer; padding: 6px 0; color: var(--gold); font-w
 .sf-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px; background: rgba(0,0,0,.2); border-radius: 10px; }
 .sf-list li .n { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .sf-list li .n b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sf-list li .fst { font-size: 12px; color: var(--gold); opacity: .9; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sf-list li .sub { font-size: 12px; color: #8be0a6; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sf-list li.busy .sub { color: var(--gold); }
 .sf-btns { display: flex; gap: 6px; flex: 1 0 100%; justify-content: flex-end; }

@@ -638,18 +638,31 @@ function kvrSchedule(kr) {
     kr.timer = setTimeout(() => { if (KV.timeUp(g)) { kvrBroadcast(kr); kvrSchedule(kr); } }, Math.max(0, g.qEnd - Date.now()) + KV.GRACE * PACE_SCALE);
   }
 }
-// kraj kruga: prijavljenima koji su bili barem pola kruga upiše se partija (online)
+// kraj kruga: prijavljenima koji su bili barem pola kruga upiše se partija i vrijeme igranja.
+// S drugima u sobi broji se kao online (pobjeda/poraz, dukati za kviz); sam/a u sobi kao vježba
+// (sekcija "botovi": prolaz = barem pola točnih, dukati kao protiv botova, s dnevnim ograničenjem).
 function kvrStats(kr) {
   const res = kr.game.result;
   if (!res) return;
+  const now = Date.now(), solo = kr.members.length < 2;
+  kr.since = kr.since || new Map();
   kr.members.forEach((t, i) => {
     const c = clients.get(t), sc = res.scores[i];
     const u = c && c.uid && ACC.user(c.uid);
+    const ms = now - (kr.since.get(t) || now);
+    kr.since.set(t, now); // sljedeći krug broji se od sad
     if (!u) return;
-    if (kr.members.length >= 2 && sc && sc.seen >= res.total / 2) {
-      const out = res.winners.includes(i) ? (res.winners.length > 1 ? 'd' : 'w') : 'l';
-      ACC.record(u, 'online', 'kviz', out);
-      ACC.addDuk(u, out === 'l' ? Shop.EARN.kvizPlay : Shop.EARN.kvizWin, out === 'l' ? 'odigrani kviz' : 'pobjeda u kvizu');
+    if (sc && sc.seen >= res.total / 2) {
+      const E$ = Shop.EARN;
+      if (solo) {
+        const out = sc.correct * 2 >= sc.seen ? 'w' : 'l';
+        ACC.record(u, 'bots', 'kviz', out, ms);
+        ACC.addDuk(u, out === 'w' ? E$.botWin.normal : E$.botLoss, out === 'w' ? 'kviz (sam/a u sobi)' : 'odigrani kviz', true);
+      } else {
+        const out = res.winners.includes(i) ? (res.winners.length > 1 ? 'd' : 'w') : 'l';
+        ACC.record(u, 'online', 'kviz', out, ms);
+        ACC.addDuk(u, out === 'l' ? E$.kvizPlay : E$.kvizWin, out === 'l' ? 'odigrani kviz' : 'pobjeda u kvizu');
+      }
     }
     pushAccount(u.id); // i skupljeni kviz bodovi
   });
@@ -662,6 +675,7 @@ function kvrJoin(token, id) {
   leaveCurrent(token);
   c.kvRoom = id; clearTimeout(c.kvAway);
   kr.members.push(token);
+  (kr.since || (kr.since = new Map())).set(token, Date.now()); // vrijeme igranja u sobi
   KV.addPlayer(kr.game, c.name);
   if (kr.game.phase === 'idle') { kr.chat = []; kr.signals = []; KV.newKrug(kr.game); }
   kvrSignal(kr, null, c.name + ' je ušao/la u sobu.');
@@ -676,7 +690,9 @@ function kvrLeave(token) {
   const i = kr.members.indexOf(token);
   if (i < 0) return;
   kr.members.splice(i, 1);
+  if (kr.since) kr.since.delete(token);
   KV.removePlayer(kr.game, i);
+  if (c && c.uid) pushAccount(c.uid); // kviz bodovi skupljeni u sobi odmah se vide u izborniku
   if (!kr.members.length) { kvrStop(kr); KV.pause(kr.game); }
   else { kvrSignal(kr, null, ((c && c.name) || 'Igrač') + ' je izašao/la.'); kvrBroadcast(kr); kvrSchedule(kr); }
   kvListSoon(); presenceSoon();
@@ -1181,7 +1197,7 @@ wss.on('connection', (ws, req) => {
     }
     switch (m.type) {
       case 'setName': c.name = clean(m.name) || c.name; break;
-      case 'botGame': if (!m.off) c.botT = Date.now(); c.bots = m.off ? null : { kind: kindOf(m), low: lowOf(m), mode: [2, 3, 4].includes(+m.mode) ? +m.mode : 2 }; presenceSoon(); break;
+      case 'botGame': if (!m.off) c.botT = Date.now() - (m.ago > 0 && !c.botT ? Math.min(+m.ago, 3 * 3600e3) : 0); // ago: igra je počela prije ponovnog spajanja c.bots = m.off ? null : { kind: kindOf(m), low: lowOf(m), mode: [2, 3, 4].includes(+m.mode) ? +m.mode : 2 }; presenceSoon(); break;
       case 'profile': {
         const acc = setProfile(c, m);
         const u = c.uid && ACC.user(c.uid);

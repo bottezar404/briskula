@@ -317,5 +317,22 @@ function client(port, name, auto) {
   assert.strictEqual(A2.user.kviz.pts, myPts + pts2); assert.strictEqual(A2.user.kviz.n, 2);
   assert.strictEqual(A2.user.kviz.cats.geo ? A2.user.kviz.cats.geo.pts : 0, pts2);
   console.log('kviz stalne sobe online ok');
+
+  // sam/a u praznoj sobi: kraj kruga se upiše u statistiku (vježba, sekcija "botovi") s vremenom igranja i dukatima
+  const e = client(port, 'Eni', true);
+  await e.open;
+  const regE = msgOf(e, 'account', m => m.user);
+  e.send({ type: 'register', uname: 'eni_' + Date.now().toString(36), pass: 'tajna123' });
+  const duk0 = (await regE).user.duk;
+  const soloAcc = msgOf(e, 'account', m => m.user && m.user.stats.bots && m.user.stats.bots.kviz);
+  e.send({ type: 'join', code: 'KV-HRV' });
+  await e.until(m => m.kvRoom === 'hrv' && m.seats.length === 1);
+  const S1 = (await soloAcc).user;
+  assert.strictEqual(S1.stats.bots.kviz.p, 1, 'krug sam/a u sobi se broji');
+  assert(S1.stats.bots.kviz.t > 0, 'vrijeme igranja u kviz sobi');
+  assert(!S1.stats.online.kviz, 'sam/a nije online partija');
+  assert(S1.duk > duk0, 'dukati za kviz sam/a');
+  e.send({ type: 'leave' });
+  console.log('kviz sam u sobi ok');
   process.exit(0);
 })().catch(e => { console.error(e); process.exit(1); });

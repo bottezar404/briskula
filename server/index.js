@@ -375,6 +375,7 @@ function recordStats(r, g) {
     const stayed = r.seats[i] && !r.seats[i].bot && res.forfeit !== i;
     if (stayed) {
       const E$ = Shop.EARN;
+      if (r.kind === 'kviz') ACC.addKvizGame(u, 'mix'); // kviz s prijateljima: pitanja iz svih kategorija
       if (section === 'online') ACC.addDuk(u, out === 'w' ? E$.onlineWin : out === 'd' ? E$.onlineDraw : E$.onlineLoss, out === 'w' ? 'pobjeda' : out === 'd' ? 'neriješeno' : 'odigrana partija');
       else ACC.addDuk(u, out === 'w' ? E$.botWin[r.level] || E$.botWin.normal : E$.botLoss, out === 'w' ? 'pobjeda protiv botova' : 'odigrana partija', true);
     }
@@ -654,6 +655,7 @@ function kvrStats(kr) {
     if (!u) return;
     if (sc && sc.seen >= res.total / 2) {
       const E$ = Shop.EARN;
+      ACC.addKvizGame(u, kr.id); // partija u kategoriji sobe
       if (solo) {
         const out = sc.correct * 2 >= sc.seen ? 'w' : 'l';
         ACC.record(u, 'bots', 'kviz', out, ms);

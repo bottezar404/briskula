@@ -331,6 +331,7 @@ function client(port, name, auto) {
   assert.strictEqual(S1.stats.bots.kviz.p, 1, 'krug sam/a u sobi se broji');
   assert(S1.stats.bots.kviz.t > 0, 'vrijeme igranja u kviz sobi');
   assert(!S1.stats.online.kviz, 'sam/a nije online partija');
+  assert.strictEqual(S1.kviz.cats.hrv.g, 1, 'partija u kategoriji sobe');
   assert(S1.duk > duk0, 'dukati za kviz sam/a');
   e.send({ type: 'leave' });
   console.log('kviz sam u sobi ok');

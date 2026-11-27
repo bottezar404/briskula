@@ -586,15 +586,24 @@ function kvListMsg() {
 }
 // ljestvica kviz bodova (svi kvizovi zajedno, ili jedna kategorija)
 function kvTopMsg(c, cat) {
-  cat = KV.CATS.some(x => x.id === cat) ? cat : null;
+  cat = cat === 'day' || KV.CATS.some(x => x.id === cat) ? cat : null;
   const me = c && c.uid && ACC.user(c.uid);
   const t = ACC.kvizTop(10, cat, me);
   // gosti ne vide tko je na ljestvici: umjesto imena i avatara "Igrač 1", "Igrač 2"...
   const row = x => !me ? { uname: '', name: 'Igrač ' + x.rank, av: AV.forName('Igrač ' + x.rank), pts: x.pts, rank: x.rank, me: false }
     : { uname: x.u.uname, name: x.u.name || x.u.uname, av: x.u.av === 'img' && x.u.img ? 'i:' + storeImg(x.u.img) : x.u.av || AV.forName(x.u.name || x.u.uname), pts: x.pts, rank: x.rank, me: x.u.id === me.id };
   const top = t.top.map(row);
-  return { type: 'kvTop', cat, top, me: t.me ? row(t.me) : null, players: t.players, guest: !me, imgs: newImgs(c, top.map(x => x.av)) };
+  // dnevna ljestvica: i tko je dobio zadnju nagradu (ime vide samo prijavljeni)
+  let last = null;
+  if (cat === 'day') {
+    const l = ACC.kvDailyLast(), lu = l && ACC.user(l.uid);
+    if (lu) last = { d: l.d, pts: l.pts, name: me ? lu.name || lu.uname : null, me: !!me && lu.id === me.id };
+  }
+  return { type: 'kvTop', cat, top, me: t.me ? row(t.me) : null, players: t.players, guest: !me, last, prize: Shop.EARN.kvizDay, imgs: newImgs(c, top.map(x => x.av)) };
 }
+// dnevna nagrada kviza: obračun u ponoć (provjera svakih 30 s, a nakon buđenja servera nadoknadi propušteno)
+ACC.onKvDaily = x => pushAccount(x.u.id);
+setInterval(() => ACC.kvDailySettle(), 30e3).unref();
 let kvListTimer = null;
 function kvListSoon() {
   if (kvListTimer) return;
@@ -783,7 +792,7 @@ function accountMsg(u, c, withImg) {
   const fv = friendsView(u, c);
   return {
     type: 'account', storage: ACC.kind,
-    user: Object.assign({ id: u.id, uname: u.uname, name: u.name, av: u.av, stats: u.stats, chips: ACC.chipsOf(u), refills: u.refills || 0, chipsLast: u.chipsLast || null, lobbyAdmin: isAdmin(u), admin: isAppAdmin(u), sugN: isAppAdmin(u) ? ACC.sugGet().m.filter(s => !s.done).length : 0, tempPass: !!u.tempPass, kviz: ACC.kvizOf(u), duk: ACC.dukOf(u), dukLast: u.dukLast || null, inv: ACC.invOf(u), eq: ACC.eqOf(u) }, withImg ? { img: u.img } : {}),
+    user: Object.assign({ id: u.id, uname: u.uname, name: u.name, av: u.av, stats: u.stats, chips: ACC.chipsOf(u), refills: u.refills || 0, chipsLast: u.chipsLast || null, lobbyAdmin: isAdmin(u), admin: isAppAdmin(u), sugN: isAppAdmin(u) ? ACC.sugGet().m.filter(s => !s.done).length : 0, tempPass: !!u.tempPass, kviz: ACC.kvizOf(u), duk: ACC.dukOf(u), dukLast: u.dukLast || null, kvWin: u.kvWin || null, inv: ACC.invOf(u), eq: ACC.eqOf(u) }, withImg ? { img: u.img } : {}),
     friends: fv.list, imgs: fv.imgs,
   };
 }

@@ -71,6 +71,7 @@
     onlineWin: 50, onlineDraw: 25, onlineLoss: 15, // online partija (barem dva čovjeka za stolom)
     tourWin: 80,      // dodatno za pobjedu u turniru
     kvizWin: 30, kvizPlay: 10,                    // online kviz (krug u stalnoj sobi)
+    kvizDay: 200,     // prvo mjesto na dnevnoj ljestvici kviza (dodjela u ponoć)
     botWin: { easy: 5, normal: 10, hard: 15 }, botLoss: 3, botDay: 250, // protiv botova: najviše botDay na dan
   };
 

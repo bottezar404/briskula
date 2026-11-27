@@ -183,6 +183,7 @@ const wrong = (q, k) => q.type === 'w' ? 't:krivo' + k : 'a:' + ((q.ans + k) % 4
 // ---------- kviz bodovi na računu ----------
 {
   const Accounts = require('../server/accounts.js');
+  const Shop = require('../public/shop.js');
   const docs = new Map();
   const st = { docs, ready: Promise.resolve(), isReady: () => true, kind: 'test', flush: async () => {}, get: k => docs.get(k), put: (k, v) => docs.set(k, v), del: k => docs.delete(k) };
   const A = Accounts.create(st);
@@ -192,8 +193,10 @@ const wrong = (q, k) => q.type === 'w' ? 't:krivo' + k : 'a:' + ((q.ans + k) % 4
   A.addKviz(u1, 900, 'geo', true); A.addKviz(u1, 0, 'geo', false); A.addKviz(u1, 700.4, 'spo', true);
   A.addKviz(u2, 1000, 'spo', true);
   A.addKviz(u3, -50, 'x<y', false); // negativno i neispravna kategorija se ne broje
-  assert.deepStrictEqual(u1.kviz, { pts: 1600, ok: 2, n: 3, cats: { geo: { pts: 900, ok: 1 }, spo: { pts: 700, ok: 1 } } });
-  assert.deepStrictEqual(u3.kviz, { pts: 0, ok: 0, n: 1, cats: {} });
+  assert.strictEqual(u1.kviz.day.pts, 1600); assert.strictEqual(u3.kviz.day, undefined, '0 bodova ne otvara dan');
+  const noDay = k => { const { day, ...r } = k; return r; };
+  assert.deepStrictEqual(noDay(u1.kviz), { pts: 1600, ok: 2, n: 3, cats: { geo: { pts: 900, ok: 1 }, spo: { pts: 700, ok: 1 } } });
+  assert.deepStrictEqual(noDay(u3.kviz), { pts: 0, ok: 0, n: 1, cats: {} });
   let t = A.kvizTop(10, null, u2);
   assert.deepStrictEqual(t.top.map(x => [x.u.uname, x.pts, x.rank]), [['ana', 1600, 1], ['bo', 1000, 2]]);
   assert.strictEqual(t.me.rank, 2); assert.strictEqual(t.players, 2);
@@ -204,6 +207,34 @@ const wrong = (q, k) => q.type === 'w' ? 't:krivo' + k : 'a:' + ((q.ans + k) % 4
   A.addKviz(u2, 900, 'spo', true); // ljestvica se osvježi bez ponovnog građenja
   assert.strictEqual(A.kvizTop(10).top[0].u.uname, 'bo');
   console.log('kviz bodovi na računu ok');
+
+  // dnevna nagrada: prvi na dnevnoj ljestvici dobije dukate, svaki dan samo jednom
+  const day = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Zagreb' });
+  const d0 = day();
+  assert.deepStrictEqual(A.kvizTop(10, 'day').top.map(x => [x.u.uname, x.pts]), [['bo', 1900], ['ana', 1600]]);
+  assert.deepStrictEqual(A.kvDailySettle(), [], 'današnji dan se ne obračunava');
+  // jučer: Ana 800, Bo 800 (Bo stigao kasnije), Ci 300
+  u1.kviz.day = { d: '2026-01-10', pts: 800, at: 100 }; u2.kviz.day = { d: '2026-01-10', pts: 800, at: 200 };
+  u3.kviz.day = { d: '2026-01-09', pts: 300, at: 50 };
+  const duk = u => A.dukOf(u);
+  const b1 = duk(u1), b2 = duk(u2), b3 = duk(u3), seen = [];
+  A.onKvDaily = x => seen.push(x.u.uname);
+  const won = A.kvDailySettle();
+  assert.deepStrictEqual(won.map(x => [x.d, x.u.uname, x.n]), [['2026-01-09', 'ci', Shop.EARN.kvizDay], ['2026-01-10', 'ana', Shop.EARN.kvizDay]]);
+  assert.deepStrictEqual(seen, ['ci', 'ana']);
+  assert.strictEqual(duk(u1), b1 + Shop.EARN.kvizDay); assert.strictEqual(duk(u2), b2); assert.strictEqual(duk(u3), b3 + Shop.EARN.kvizDay);
+  assert.strictEqual(u1.kvWin.d, '2026-01-10'); assert.strictEqual(u1.kvWin.pts, 800);
+  assert.deepStrictEqual(A.kvDailySettle(), [], 'nema dvostruke nagrade');
+  assert.strictEqual(duk(u1), b1 + Shop.EARN.kvizDay);
+  assert.deepStrictEqual(A.kvDailyLast(), { d: '2026-01-10', uid: 1, pts: 800 });
+  // novi bodovi danas: stari dan se obračuna prije prelaska (ovdje već obračunat), dnevni bodovi kreću od nule
+  u2.kviz.day = { d: '2026-01-11', pts: 50, at: 1 };
+  A.addKviz(u2, 400, 'geo', true);
+  assert.strictEqual(duk(u2), b2 + Shop.EARN.kvizDay, 'Bo dobije nagradu za 11.1. kad počne novi dan');
+  assert.deepStrictEqual(u2.kviz.day.d, d0); assert.strictEqual(u2.kviz.day.pts, 400);
+  assert.deepStrictEqual(A.kvizTop(10, 'day').top.map(x => [x.u.uname, x.pts]), [['bo', 400]]);
+  assert.strictEqual(docs.get('kvDaily').d, '2026-01-11');
+  console.log('dnevna nagrada kviza ok');
 }
 
 // ---------- online ----------
@@ -292,6 +323,11 @@ function client(port, name, auto) {
   // gost ne vidi imena ni avatare na ljestvici, samo "Igrač 1", "Igrač 2"...
   if (myPts) assert(T2.top.length > 0, 'ljestvica nije prazna');
   assert(T2.top.every(x => !x.uname && x.name === 'Igrač ' + x.rank && !x.av.startsWith('i:')), 'gost vidi samo Igrač N');
+  const topDay = msgOf(d, 'kvTop');
+  d.send({ type: 'kvTop', cat: 'day' });
+  const T3 = await topDay;
+  assert.strictEqual(T3.cat, 'day'); assert.strictEqual(T3.prize, 200);
+  if (myPts) assert(T3.top.length > 0, 'dnevna ljestvica nije prazna');
   if (myPts) assert(T.top.some(x => x.uname && x.name === 'Cvita'), 'prijavljeni vide imena');
   c.send({ type: 'chat', text: 'bok' });
   await d.until(m => m.chat && m.chat.some(x => x.text === 'bok' && x.from === 0));

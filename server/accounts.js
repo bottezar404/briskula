@@ -185,6 +185,14 @@ function create(store) {
       save(u);
       return k.pts;
     },
+    /** odigrana kviz partija u kategoriji: krug u stalnoj sobi (kategorija sobe, 'mix' = Miješano) ili kviz s prijateljima ('mix') */
+    addKvizGame(u, cat) {
+      if (!/^[a-z]{2,8}$/.test(cat || '')) return;
+      if (!u.kviz) { u.kviz = { pts: 0, ok: 0, n: 0, cats: {} }; kvTop = null; }
+      const k = u.kviz, c = k.cats[cat] || (k.cats[cat] = { pts: 0, ok: 0 });
+      c.g = (c.g || 0) + 1; k.g = (k.g || 0) + 1;
+      save(u);
+    },
     /** ljestvica: najboljih n po ukupnim bodovima (ili u jednoj kategoriji) + mjesto zadanog korisnika */
     kvizTop(n, cat, me) {
       if (!kvTop) {

@@ -7,6 +7,7 @@
 // test/version.js provjerava da se broj slaže s package.json.
 (function () {
   const NOTES = [
+    { v: '1.25.1', d: '2026-11-27', t: 'Statistika kviza: umjesto točnih odgovora po kategoriji sad piše broj odigranih partija (krugova) u svakoj kategoriji, plus Miješano.' },
     { v: '1.25.0', d: '2026-11-27', t: 'Više dukata: online pobjeda 50, protiv botova 5/10/15 i do 250 na dan, kviz 30/10, dnevni bonus 40.' },
     { v: '1.24.1', d: '2026-11-27', t: 'Sati igranja vide se i kod drugih igrača (u igri i među online prijateljima), kviz sam u sobi sad se broji u statistiku i daje dukate.' },
     { v: '1.24.0', d: '2026-11-27', t: 'Kviz: gotovo 5000 novih pitanja u svim kategorijama (sad ih je oko 7000), s ponuđenim odgovorima i na pisanje.' },

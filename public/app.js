@@ -2081,10 +2081,13 @@
   }
   function kvizStatsHtml(k) {
     k = k || { pts: 0, ok: 0, n: 0, cats: {} };
-    const rows = KV.CATS.map(c => { const x = (k.cats || {})[c.id] || { pts: 0, ok: 0 }; return `<tr class="${x.pts || x.ok ? '' : 'zero'}"><td>${c.icon} ${esc(c.name)}</td><td>${x.ok}</td><td>${kvPts(x.pts)}</td></tr>`; }).join('');
+    // partija = završen krug (10 pitanja) u stalnoj sobi na kojem je igrač bio barem pola pitanja;
+    // soba Miješano i kvizovi s prijateljima (pitanja iz svih kategorija) broje se pod Miješano
+    const rows = KV.CATS.concat([{ id: 'mix', name: 'Miješano', icon: '🎲' }]).map(c => { const x = (k.cats || {})[c.id] || {}; return `<tr class="${x.pts || x.g ? '' : 'zero'}"><td>${c.icon} ${esc(c.name)}</td><td>${x.g || 0}</td><td>${kvPts(x.pts || 0)}</td></tr>`; }).join('');
     return `<div class="wallet-box"><div>Kviz bodovi (skupljeno)</div><b>⭐ ${kvPts(k.pts)}</b></div>
       <p class="muted">Bodovi iz svih online kvizova (stalne sobe i sobe s prijateljima) zbrajaju se na računu. Točnih odgovora: ${k.ok} od ${k.n}${k.n ? ` (${Math.round(100 * k.ok / k.n)}%)` : ''}.</p>
-      <table class="scores stats"><tr><th>Kategorija</th><th>Točnih</th><th>Bodovi</th></tr>${rows}</table>`;
+      <table class="scores stats"><tr><th>Kategorija</th><th>Partija</th><th>Bodovi</th></tr>${rows}</table>
+      <p class="muted">Partija = jedan krug od 10 pitanja u sobi te kategorije (ako si bio/la barem na pola pitanja). Soba Miješano i kvizovi s prijateljima broje se pod Miješano.</p>`;
   }
   // ---------- trgovina ----------
   const shop = { tab: 'fr' };

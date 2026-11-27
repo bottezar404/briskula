@@ -67,11 +67,11 @@
   const EARN = {
     start: 100,       // novi račun (stari računi dobiju i 5 po dosadašnjoj pobjedi, najviše 1000)
     perOldWin: 5, oldMax: 1000,
-    daily: 25,        // prva prijava u danu
-    onlineWin: 30, onlineDraw: 15, onlineLoss: 8, // online partija (barem dva čovjeka za stolom)
-    tourWin: 50,      // dodatno za pobjedu u turniru
-    kvizWin: 20, kvizPlay: 5,                    // online kviz (krug u stalnoj sobi)
-    botWin: { easy: 3, normal: 6, hard: 10 }, botLoss: 1, botDay: 100, // protiv botova: najviše botDay na dan
+    daily: 40,        // prva prijava u danu
+    onlineWin: 50, onlineDraw: 25, onlineLoss: 15, // online partija (barem dva čovjeka za stolom)
+    tourWin: 80,      // dodatno za pobjedu u turniru
+    kvizWin: 30, kvizPlay: 10,                    // online kviz (krug u stalnoj sobi)
+    botWin: { easy: 5, normal: 10, hard: 15 }, botLoss: 3, botDay: 250, // protiv botova: najviše botDay na dan
   };
 
   const api = { CUR: 'Dukati', cur: n => n % 10 === 1 && n % 100 !== 11 ? 'dukat' : 'dukata', SLOTS, ITEMS, BY_ID, EARN };

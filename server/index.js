@@ -194,6 +194,8 @@ function createRoom(mode, host, opts) {
     isPublic: !!opts.isPublic, kind: opts.kind || 'briskula', low: !!opts.low, tour: null, target: T.TARGETS.includes(+opts.target) ? +opts.target : 41, signals: [], chat: [], chatSeq: 0, wins: null, touched: Date.now(), awayTimer: null,
     turnTime: turnTimeOf(opts.turnTime), turnTimer: null, turnKey: null, turnEnds: 0,
     kvUsed: [], kvBots: [], kvQ: -1, // kviz: nedavna pitanja u sobi (da se ne ponavljaju), timeri botova
+    // zadnji djelitelj u sobi: prvi se izvlači nasumično, a dalje se vrti i kad se igra vrati u sobu
+    lastDealer: crypto.randomInt(mode) - 1,
   };
   setKind(r, r.kind, r.low);
   rooms.set(r.code, r);
@@ -316,6 +318,12 @@ function broadcast(r) {
   for (const s of r.seats) if (s && !s.bot) { const c = clients.get(s.token); if (c && c.room === r.code) send(c.ws, roomView(r, s.token)); }
 }
 
+// povratak u sobu: zapamti tko je zadnji dijelio, da sljedeća partija nastavi krug
+function clearGame(r) {
+  if (r.game && r.game.dealer != null) r.lastDealer = r.game.dealer;
+  r.game = null;
+}
+
 function startGame(r) {
   if (r.seats.some(s => !s)) return false;
   // turnir: sljedeća igra u nizu (nakon zadnje počinje novi turnir)
@@ -324,9 +332,9 @@ function startGame(r) {
     const k = TR.stageKind(r.tour);
     if (k !== r.kind) { r.kind = k; r.wins = Array(sideCount(r)).fill(0); }
   }
-  const prevDealer = r.game && r.game.kind === r.kind ? r.game.dealer : -1;
+  const prevDealer = r.game && r.game.dealer != null ? r.game.dealer : r.lastDealer;
   r.gameAt = Date.now();
-  const o = { names: r.seats.map(s => s.name), bots: r.seats.map(s => !!s.bot), dealer: prevDealer + 1, blindEvery: r.tour ? TOUR_BLINDS : undefined };
+  const o = { names: r.seats.map(s => s.name), bots: r.seats.map(s => !!s.bot), dealer: (prevDealer + 1) % r.mode, blindEvery: r.tour ? TOUR_BLINDS : undefined };
   if (r.kind === 'poker') r.game = P.newGame(r.mode, o);
   else if (r.kind === 'covjece') r.game = CJ.newGame(r.mode, o);
   else if (r.kind === 'kviz') {
@@ -336,6 +344,7 @@ function startGame(r) {
   }
   else r.game = r.kind === 'treseta' ? T.newGame(r.mode, Object.assign(o, { target: r.target, low: r.low })) : E.newGame(r.mode, Object.assign(o, { low: r.low }));
   r.signals = []; r.ready = new Set();
+  r.lastDealer = (prevDealer + 1) % r.mode;
   // tko je za stolom s računom (za statistiku; tko izađe usred partije, upiše mu se poraz)
   r.uids = r.seats.map(s => { const c = !s.bot && clients.get(s.token); return c && c.uid || null; });
   r.humans = r.seats.filter(s => !s.bot).length;
@@ -1280,12 +1289,12 @@ wss.on('connection', (ws, req) => {
         const t = r.seats[to];
         if (t && !t.bot) return err('To mjesto je zauzeto.');
         r.seats[to] = r.seats[from]; r.seats[from] = t || null;
-        r.game = null; broadcast(r); break;
+        clearGame(r); broadcast(r); break;
       }
       case 'addBot': if (r && r.host === token && !r.game) { addBot(r); broadcast(r); } break;
       case 'kick': if (r && r.host === token && !r.game) { const s = r.seats[+m.seat]; if (s && s.bot) { r.seats[+m.seat] = null; broadcast(r); } } break;
-      case 'variant': if (r && r.host === token && !r.isPublic && (!r.game || r.game.phase === 'over')) { setKind(r, kindOf(m), lowOf(m)); r.game = null; broadcast(r); } break;
-      case 'target': if (r && r.host === token && T.TARGETS.includes(+m.target) && (!r.game || r.game.phase === 'over')) { r.target = +m.target; r.game = null; broadcast(r); } break;
+      case 'variant': if (r && r.host === token && !r.isPublic && (!r.game || r.game.phase === 'over')) { setKind(r, kindOf(m), lowOf(m)); clearGame(r); broadcast(r); } break;
+      case 'target': if (r && r.host === token && T.TARGETS.includes(+m.target) && (!r.game || r.game.phase === 'over')) { r.target = +m.target; clearGame(r); broadcast(r); } break;
       case 'next': {
         // kraj ruke: svatko pritisne "Dalje"; kad su svi spremni, odmah nova ruka (inače nakon HAND_PAUSE)
         if (!r || !r.game || r.game.phase !== 'hand') break;
@@ -1305,7 +1314,7 @@ wss.on('connection', (ws, req) => {
         if (m.fillBots) while (r.seats.includes(null)) addBot(r);
         if (!startGame(r)) err('Sva mjesta moraju biti popunjena.');
         break;
-      case 'toLobby': if (r && r.host === token && r.game && r.game.phase === 'over') { r.game = null; broadcast(r); } break;
+      case 'toLobby': if (r && r.host === token && r.game && r.game.phase === 'over') { clearGame(r); broadcast(r); } break;
       case 'play': {
         if (!r || !r.game) return;
         const p = seatOf(r, token);

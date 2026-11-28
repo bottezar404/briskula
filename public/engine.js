@@ -26,8 +26,16 @@
     return d;
   }
 
+  // kriptografski slučajni brojevi (preglednik i Node 18+); Math.random samo kao rezerva
+  const RNG = (function () {
+    const c = typeof globalThis !== 'undefined' && globalThis.crypto;
+    if (!c || typeof c.getRandomValues !== 'function') return Math.random;
+    const buf = new Uint32Array(2);
+    return function () { c.getRandomValues(buf); return (buf[0] * 2097152 + (buf[1] >>> 11)) / 9007199254740992; };
+  })();
+
   function shuffle(arr, rng) {
-    rng = rng || Math.random;
+    rng = rng || RNG;
     for (let i = arr.length - 1; i > 0; i--) {
       const j = Math.floor(rng() * (i + 1));
       const t = arr[i]; arr[i] = arr[j]; arr[j] = t;
@@ -68,7 +76,7 @@
     for (let p = 0; p < mode; p++) {
       players.push({ name: (opts.names && opts.names[p]) || ('Igrač ' + (p + 1)), bot: !!(opts.bots && opts.bots[p]), hand: [], won: [] });
     }
-    const dealer = opts.dealer != null ? opts.dealer % mode : Math.floor((opts.rng || Math.random)() * mode);
+    const dealer = opts.dealer != null ? opts.dealer % mode : Math.floor((opts.rng || RNG)() * mode);
     const first = (dealer + 1) % mode;
     // deck[0] je okrenuta briškula (zadnja se vuče), vuče se s kraja
     const trump = deck[0];
@@ -174,7 +182,7 @@
 
   return {
     SUITS, RANKS, POINTS, SUIT_NAMES, RANK_NAMES,
-    suitOf, rankOf, points, strength, cardName, fullDeck, shuffle,
+    suitOf, rankOf, points, strength, cardName, fullDeck, shuffle, RNG,
     trickWinnerIndex, beats, teamOf, newGame, canPlay, play, collect, viewFor, playerPoints,
   };
 });

@@ -248,7 +248,7 @@
       this.tour = this.kind === 'turnir' ? TR.newTour(mode) : null;
       if (this.tour) { this.kind = TR.stageKind(this.tour); this.low = false; }
       this.E = engOf(this.kind); this.B = botOf(this.kind);
-      const botNames = ['Jure', 'Mare', 'Ante', 'Luce', 'Frane', 'Tonka'].sort(() => Math.random() - .5);
+      const botNames = E.shuffle(['Jure', 'Mare', 'Ante', 'Luce', 'Frane', 'Tonka']);
       this.names = [name || 'Ti'].concat(botNames.slice(0, mode - 1).map(n => 'Bot ' + n));
       this.avs = this.names.map((n, i) => i ? AV.forName(n) : null);
       this.wins = Array(mode === 4 && !solo(this.kind) ? 2 : mode).fill(0);

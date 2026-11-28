@@ -54,8 +54,16 @@
   function fullDeck() { return FULL.slice(); }
   function deckFor(mode) { return (mode === 3 ? DECK3 : FULL).slice(); }
 
+  // kriptografski slučajni brojevi (preglednik i Node 18+); Math.random samo kao rezerva
+  const RNG = (function () {
+    const c = typeof globalThis !== 'undefined' && globalThis.crypto;
+    if (!c || typeof c.getRandomValues !== 'function') return Math.random;
+    const buf = new Uint32Array(2);
+    return function () { c.getRandomValues(buf); return (buf[0] * 2097152 + (buf[1] >>> 11)) / 9007199254740992; };
+  })();
+
   function shuffle(arr, rng) {
-    rng = rng || Math.random;
+    rng = rng || RNG;
     for (let i = arr.length - 1; i > 0; i--) {
       const j = Math.floor(rng() * (i + 1));
       const t = arr[i]; arr[i] = arr[j]; arr[j] = t;
@@ -124,7 +132,7 @@
       akuzeOn: opts.akuze !== false && !opts.low,
       score: Array(teamCount(mode)).fill(0),
       hands: [], handNo: 0,
-      dealer: opts.dealer != null ? ((opts.dealer % mode) + mode) % mode : Math.floor((opts.rng || Math.random)() * mode),
+      dealer: opts.dealer != null ? ((opts.dealer % mode) + mode) % mode : Math.floor((opts.rng || RNG)() * mode),
       rng: null, result: null, handResult: null,
     };
     Object.defineProperty(st, 'rng', { value: opts.rng || null, enumerable: false, writable: true });
@@ -281,7 +289,7 @@
 
   return {
     SUITS, RANKS, STRENGTH, BELE, LAST_BELE, TARGETS,
-    suitOf, rankOf, bele, points, strength, fmt, fullDeck, deckFor, shuffle,
+    suitOf, rankOf, bele, points, strength, fmt, fullDeck, deckFor, shuffle, RNG,
     trickWinnerIndex, beats, teamOf, teamCount, teamPlayers, legalCards, findAkuze,
     newGame, canPlay, play, collect, nextHand, viewFor, playerPoints,
   };

@@ -73,6 +73,7 @@
     kvizWin: 30, kvizPlay: 10,                    // online kviz (krug u stalnoj sobi)
     kvizDay: 200,     // prvo mjesto na dnevnoj ljestvici kviza (dodjela u ponoć)
     botWin: { easy: 5, normal: 10, hard: 15 }, botLoss: 3, botDay: 250, // protiv botova: najviše botDay na dan
+    skokPer: 20, skokMax: 20, // Skakavac: 1 dukat za svakih 20 katova (najviše 20 po igri, u dnevnoj granici za botove)
   };
 
   const api = { CUR: 'Dukati', cur: n => n % 10 === 1 && n % 100 !== 11 ? 'dukat' : 'dukata', SLOTS, ITEMS, BY_ID, EARN };

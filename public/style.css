@@ -1073,3 +1073,32 @@ span.prof-link { border-radius: 0; flex: 1; min-width: 0; }
 .prof-link:hover .av { filter: brightness(1.08); }
 .friends .fst { display: block; font-size: 12px; color: var(--gold); opacity: .9; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .prof-head { margin-bottom: 10px; }
+
+/* ---------- Skakavac (igra skakanja) ---------- */
+.sk-stats, .sk-res { display: flex; gap: 8px; margin: 0 0 12px; }
+.sk-stats > div, .sk-res > div { flex: 1; text-align: center; padding: 8px 4px; border-radius: 12px; background: rgba(0,0,0,.18); }
+.sk-stats b, .sk-res b { display: block; font-size: 22px; color: var(--gold); font-variant-numeric: tabular-nums; }
+.sk-stats small, .sk-res small { font-size: 12px; opacity: .8; }
+.sk-how { margin: 10px 0 0; font-size: 13px; }
+.kv-board .sk-fl { font-size: 12px; margin-left: auto; white-space: nowrap; }
+.kv-board .sk-fl + b { min-width: 48px; text-align: right; }
+body.sk-on { overflow: hidden; overscroll-behavior: none; }
+body.sk-on #app { padding: 0; }
+.sk-wrap { position: fixed; inset: 0; z-index: 40; display: flex; align-items: center; justify-content: center; background: #0d2a1c; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+.sk-cv { display: block; border-radius: 6px; box-shadow: 0 0 40px rgba(0,0,0,.5); }
+.sk-top { position: absolute; top: calc(10px + env(safe-area-inset-top)); left: 50%; transform: translateX(-50%); width: min(100%, 560px); display: flex; justify-content: flex-end; gap: 8px; padding: 0 12px; pointer-events: none; }
+.sk-top .sk-btn { pointer-events: auto; width: 42px; height: 42px; padding: 0; border-radius: 50%; background: rgba(0,0,0,.45); color: #fff; font-size: 17px; }
+.sk-pad { position: absolute; left: 0; right: 0; bottom: calc(14px + env(safe-area-inset-bottom)); display: flex; gap: 12px; padding: 0 14px; pointer-events: none; }
+.sk-pad.hid, .sk-ov.hid { display: none; }
+.sk-k { pointer-events: auto; width: 76px; height: 76px; padding: 0; border-radius: 50%; background: rgba(255,255,255,.22); color: #fff; font-size: 26px; border: 2px solid rgba(255,255,255,.45); touch-action: none; -webkit-tap-highlight-color: transparent; }
+.sk-k.sk-j { margin-left: auto; width: 96px; height: 96px; font-size: 18px; font-weight: 900; background: rgba(229,199,122,.5); }
+.sk-k.on { background: rgba(255,255,255,.5); transform: scale(.94); }
+.sk-k.sk-j.on { background: rgba(229,199,122,.85); }
+.sk-ov { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.45); padding: 16px; }
+.sk-card { width: min(92vw, 360px); background: var(--felt2); border: 1px solid rgba(229,199,122,.4); border-radius: 18px; padding: 18px; text-align: center; box-shadow: 0 10px 40px rgba(0,0,0,.5); }
+.sk-card h2 { font-size: 24px; margin-bottom: 12px; }
+.sk-card .row { display: flex; gap: 8px; margin-top: 12px; }
+.sk-card .row button { flex: 1; }
+.sk-duk { font-weight: 800; color: var(--gold); margin: 6px 0 0; }
+.sk-hint { font-size: 12px; margin: 10px 0 0; }

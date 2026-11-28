@@ -1151,8 +1151,8 @@ function accountMessage(m, token, c, ws, ip) {
       if (!u) return;
       const floor = Math.floor(+m.floor), score = Math.floor(+m.score), ms = Math.floor(+m.ms), combo = Math.floor(+m.combo) || 0;
       if (![floor, score, ms].every(Number.isFinite) || floor < 0 || score < 0 || ms < 1000) return;
-      // najviše ~10 katova u sekundi; bodovi = 10 po katu + kvadrati kombo skokova (ne više od kat²)
-      if (floor > 20 + ms / 100 || score > floor * 10 + floor * floor || combo > floor) return;
+      // najviše ~12 katova u sekundi; bodovi = 10 po katu + zvjezdice (25, najviše jedna po katu) + kvadrati kombo skokova (ne više od kat²)
+      if (floor > 20 + ms / 80 || score > floor * 35 + floor * floor || combo > floor) return;
       const now = Date.now();
       if (now - (c.skokAt || 0) < Math.min(ms, 3000)) return;
       c.skokAt = now;

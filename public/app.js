@@ -60,6 +60,9 @@
     avatar: store.get('avatar', 'e' + Math.floor(Math.random() * AV.N)),
     avatarImg: store.get('avatarImg', ''),
     turnTime: store.get('turnTime', 30), // online: sekunde za potez (0 = bez ograničenja)
+    // Skakavac: upravljanje na mobitelu ('prst' = povlačenje po ekranu, 'gumbi') i automatski skok (1/0)
+    skCtrl: store.get('skCtrl', 'prst'),
+    skAuto: store.get('skAuto', matchMedia('(pointer: coarse)').matches ? 1 : 0),
   };
   if (!/^e\d{1,2}$/.test(S.avatar) && !(S.avatar === 'img' && S.avatarImg)) S.avatar = 'e0';
   if (!KIND_NAMES[S.kind]) S.kind = 'briskula'; // stari 'meno' = briškula na manje
@@ -1642,12 +1645,15 @@
   let skokRun = null, skTop = null, skTopAt = 0;
   const skBest = () => Math.max(store.get('skokBest', 0) || 0, (acc.user && acc.user.skok && acc.user.skok.best) || 0);
   function skokPanelHtml() {
-    const k = acc.user && acc.user.skok, best = skBest();
+    const k = acc.user && acc.user.skok, best = skBest(), touch = matchMedia('(pointer: coarse)').matches;
     return `<div class="panel sk-panel">
         <h2>🦗 ${SK.NAME}</h2>
         <div class="sk-stats"><div><b>${best || '–'}</b><small>rekord</small></div><div><b>${k && k.floor || store.get('skokFloor', 0) || '–'}</b><small>najviši kat</small></div><div><b>${k ? k.n : store.get('skokN', 0)}</b><small>igara</small></div></div>
+        ${touch ? seg('skCtrl', [['prst', '👆 Prstom po ekranu'], ['gumbi', '◀ ▶ Gumbi']], S.skCtrl) : ''}
+        ${seg('skAuto', [[1, 'Skače sam'], [0, touch ? (S.skCtrl === 'gumbi' ? 'Skok gumbom' : 'Skok dodirom') : 'Skok tipkom']], S.skAuto ? 1 : 0)}
         <button id="playSkok" style="width:100%">Igraj</button>
-        <p class="muted sk-how">${matchMedia('(pointer: coarse)').matches ? 'Gumbi ◀ ▶ za trčanje, SKOK za skok.' : 'Strelice ← → (ili A/D) za trčanje, razmak ili ↑ za skok, P za pauzu.'} Zaleti se: što brže trčiš, to više skočiš. Odbij se od stabljike sa strane! Skokovi preko 2 i više katova zaredom slažu <b>kombo</b>: na kraju dobiješ katovi² bodova.</p>
+        <p class="muted sk-how">${touch ? (S.skCtrl === 'gumbi' ? 'Gumbi ◀ ▶ za trčanje' + (S.skAuto ? '.' : ', SKOK za skok.') : 'Povuci prst lijevo ili desno bilo gdje po ekranu: što dalje povučeš, brže trči.' + (S.skAuto ? '' : ' Kratki dodir ili drugi prst = skok.')) : 'Strelice ← → (ili A/D) za trčanje' + (S.skAuto ? '' : ', razmak ili ↑ za skok') + ', P za pauzu.'} Zaleti se: što brže trčiš, to više skočiš. Odbij se od stabljike sa strane! Skokovi preko 2 i više katova zaredom slažu <b>kombo</b>: na kraju dobiješ katovi² bodova.</p>
+        <p class="muted sk-how">⭐ zvjezdica +25 · 🍄 gljiva-opruga baci te visoko · 🐝 ose (od 25. kata) ruše kombo i odbace te · od 40. kata neke grančice se slome, od 60. se neke pomiču.</p>
         ${window.BRK_OFFLINE ? '' : `<div class="kv-top" id="skTop">${skTopHtml()}</div>`}
       </div>`;
   }
@@ -1673,7 +1679,7 @@
     modal = null;
     renderSideF();
     skokRun = SK.play($app, {
-      sound: S.sound, beep, best: skBest(),
+      sound: S.sound, beep, best: skBest(), ctrl: S.skCtrl, auto: !!S.skAuto,
       onEnd(res, extra) {
         store.set('skokN', (store.get('skokN', 0) || 0) + 1);
         if (res.floor > (store.get('skokFloor', 0) || 0)) store.set('skokFloor', res.floor);

@@ -6,7 +6,7 @@
   const P = window.PokerEngine, PB = window.PokerBot, TR = window.Turnir;
   const CJ = window.CovjeceEngine, CB = window.CovjeceBot;
   const KV = window.KvizEngine, KVB = window.KvizBot, KVS = window.KvizSlike;
-  const SH = window.Shop;
+  const SH = window.Shop, SK = window.Skakavac;
   const engOf = k => k === 'treseta' ? T : k === 'poker' ? P : k === 'covjece' ? CJ : k === 'kviz' ? KV : E;
   const botOf = k => k === 'treseta' ? TB : k === 'poker' ? PB : k === 'covjece' ? CB : k === 'kviz' ? KVB : B;
   // u pokeru, Čovječe i kvizu svatko igra za sebe (i u četvero); "Chi fa meno" postoji samo za briškulu i trešetu
@@ -22,8 +22,10 @@
   const LOW_NAME = 'Chi fa meno';
   const CJ_NAME = 'Čovječe ne ljuti se';
   const KV_NAME = 'Kviz ' + KV.NAME;
-  const KIND_NAMES = { briskula: 'Briškula', treseta: 'Trešeta', poker: 'Poker', turnir: 'Turnir', covjece: CJ_NAME, kviz: KV_NAME };
+  const KIND_NAMES = { briskula: 'Briškula', treseta: 'Trešeta', poker: 'Poker', turnir: 'Turnir', covjece: CJ_NAME, kviz: KV_NAME, skok: SK.NAME };
   const KINDS = [['briskula', 'Briškula'], ['treseta', 'Trešeta'], ['poker', 'Poker'], ['turnir', 'Turnir'], ['covjece', 'Čovječe'], ['kviz', 'Kviz']];
+  // izbornik ima i Skakavca (igra za jednog, nema sobe ni botova)
+  const MENU_KINDS = KINDS.concat([['skok', '🦗 ' + SK.NAME]]);
   const LOWS = [[0, 'Obično'], [1, LOW_NAME]];
   const kindLabel = (k, low) => (k === 'treseta' ? ' · Trešeta' : k === 'poker' ? ' · Poker' : k === 'covjece' ? ' · ' + CJ_NAME : k === 'kviz' ? ' · ' + KV_NAME : '') + (low && hasLow(k) ? ' · ' + LOW_NAME : '');
   // naziv igre za prijatelje, pozive i sl., npr. "Trešeta · Chi fa meno"
@@ -382,6 +384,8 @@
         else if (m.type === 'sugList') { sug.list = m.list; if (acc.user) acc.user.sugN = m.list.filter(x => !x.done).length; if (modal === 'sug' || !room) render(); }
         else if (m.type === 'sugOk') { sug.sent = true; sug.busy = false; sug.draft = ''; if (modal === 'sug') render(); toast('Hvala na prijedlogu!'); }
         else if (m.type === 'kvList') { kvRooms = m.rooms || []; kvListPaint(); }
+        else if (m.type === 'skokTop') { if (m.imgs) Object.assign(imgCache, m.imgs); skTop = m; skTopAt = Date.now(); skTopPaint(); }
+        else if (m.type === 'skokSaved') { skTopAt = 0; if (m.rec) toast('🏆 Novi rekord u Skakavcu je spremljen na račun!'); }
         else if (m.type === 'kvTop') { if (m.imgs) Object.assign(imgCache, m.imgs); kvTop = m; kvTopPaint(); }
         else if (m.type === 'dm' || m.type === 'dmMsg' || m.type === 'dmSeen' || m.type === 'dmRead') onDm(m);
         else if (m.type === 'lobbyDenied') { lobbyReset(); render(); }
@@ -791,7 +795,8 @@
 
   // ---------- prikaz ----------
   function render() {
-    if (!room) renderMenu();
+    if (skokRun) { /* Skakavac crta sam na canvas */ }
+    else if (!room) renderMenu();
     else if (!room.game) renderLobby();
     else renderGame();
     renderModal();
@@ -810,6 +815,7 @@
     treseta: 'Trešeta: bez briškule, mora se odgovoriti na boju. Igra se u više ruku, do zadanog broja bodova.',
     poker: 'Poker (Texas Hold\'em) s običnim kartama (52 karte): 2 karte u ruci, 5 na stolu, ulaže se žetonima. Pobjeđuje tko pokupi sve žetone. Prijavljenima se žetoni pamte na računu.',
     covjece: CJ_NAME + ': društvena igra s kockom. Svatko ima 4 figure, iz kućice se izlazi šesticom, a tko stane na tuđu figuru, vraća je u kućicu. Pobjeđuje tko prvi dovede sve figure u cilj.',
+    skok: SK.NAME + ': skači s grančice na grančicu sve više prema nebu. Ekran se diže sve brže, a tko se zaleti i preskoči više katova odjednom, slaže kombo i dobiva puno više bodova.',
     kviz: KV_NAME + ': kviz općeg znanja. Svi odgovaraju na ista pitanja u isto vrijeme, a tko točno odgovori brže, dobije više bodova. Tri runde po pet pitanja, u finalu dvostruki bodovi.',
     turnir: 'Turnir: tri igre zaredom, <b>briškula → trešeta → poker</b>. U svakoj igri dobiješ bod za svakog protivnika kojeg nadigraš; pobjeđuje tko na kraju ima najviše bodova. U četvero se briškula i trešeta igraju u parovima, a poker svatko za sebe.',
   };
@@ -837,12 +843,12 @@
       </div>
       <div class="panel">
         <h2>Vrsta igre</h2>
-        ${seg('kind', KINDS, S.kind)}
+        ${seg('kind', MENU_KINDS, S.kind)}
         ${hasLow(S.kind) ? seg('naManje', LOWS, S.naManje) : ''}
         ${S.kind === 'treseta' || S.kind === 'turnir' ? seg('target', [[21, 'Do 21'], [31, 'Do 31'], [41, 'Do 41']], S.target) : ''}
         <p class="muted" style="margin:0">${kindDesc(S.kind, S.naManje)}</p>
       </div>
-      <div class="panel">
+      ${S.kind === 'skok' ? skokPanelHtml() : `<div class="panel">
         <h2>Igraj protiv botova</h2>
         ${seg('botMode', modeSeg(S.kind), S.botMode)}
         ${seg('botLevel', [['easy', 'Lako'], ['normal', 'Srednje'], ['hard', 'Teško']], S.botLevel)}
@@ -860,7 +866,7 @@
           <div class="row"><input id="code" maxlength="5" placeholder="Kod sobe" style="text-transform:uppercase"><button id="join" class="ghost" style="flex:0 0 auto">Uđi</button></div>
         </div>
         <p class="muted" style="margin:10px 0 0">Napravi sobu i pošalji link prijateljima. Prazna mjesta možeš popuniti botovima.</p>
-      </div>`}
+      </div>`}`}
       <div class="links">
         <button class="ghost small" id="rules">Pravila</button>
         <button class="ghost small" id="settings">Postavke</button>
@@ -878,14 +884,15 @@
     if (psb) psb.onclick = () => { if (loggedIn()) { modal = 'stats'; net && net.send({ type: 'account' }); } else { modal = 'account'; acc.err = ''; } render(); };
     bindSegs();
     const needName = () => { if (!S.name) { S.name = 'Igrač' + Math.floor(Math.random() * 900 + 100); save(); } };
-    $app.querySelector('#playBots').onclick = () => {
+    if (S.kind === 'skok') { bindSkokPanel(needName); }
+    else $app.querySelector('#playBots').onclick = () => {
       needName();
       const low = hasLow(S.kind) && !!S.naManje;
       if (loggedIn() && net) net.send({ type: 'botGame', kind: S.kind, low, mode: +S.botMode }); // prijatelji vide u kojoj si igri
       ctrl = new LocalGame(+S.botMode, S.botLevel, S.name, S.kind, S.target, low);
     };
     if (!window.BRK_OFFLINE && S.kind === 'kviz') { kvListSub(); kvListPaint(); kvTopAsk(); kvTopPaint(); }
-    if (!window.BRK_OFFLINE) {
+    if (!window.BRK_OFFLINE && S.kind !== 'skok') {
     $app.querySelector('#create').onclick = () => { needName(); ctrl = getNet(); ctrl.send(profileMsg()); ctrl.send({ type: 'create', mode: +S.onMode, level: 'normal', kind: S.kind, low: !!S.naManje, target: S.target, turnTime: S.turnTime }); };
     $app.querySelector('#quick').onclick = () => { needName(); ctrl = getNet(); ctrl.send(profileMsg()); ctrl.send({ type: 'quick', mode: +S.onMode, kind: S.kind, low: !!S.naManje }); };
     const join = () => {
@@ -1631,6 +1638,57 @@
       <button id="close" style="width:100%">Zatvori</button></div>`;
   }
 
+  // ---------- Skakavac (igra skakanja po platformama, za jednog igrača) ----------
+  let skokRun = null, skTop = null, skTopAt = 0;
+  const skBest = () => Math.max(store.get('skokBest', 0) || 0, (acc.user && acc.user.skok && acc.user.skok.best) || 0);
+  function skokPanelHtml() {
+    const k = acc.user && acc.user.skok, best = skBest();
+    return `<div class="panel sk-panel">
+        <h2>🦗 ${SK.NAME}</h2>
+        <div class="sk-stats"><div><b>${best || '–'}</b><small>rekord</small></div><div><b>${k && k.floor || store.get('skokFloor', 0) || '–'}</b><small>najviši kat</small></div><div><b>${k ? k.n : store.get('skokN', 0)}</b><small>igara</small></div></div>
+        <button id="playSkok" style="width:100%">Igraj</button>
+        <p class="muted sk-how">${matchMedia('(pointer: coarse)').matches ? 'Gumbi ◀ ▶ za trčanje, SKOK za skok.' : 'Strelice ← → (ili A/D) za trčanje, razmak ili ↑ za skok, P za pauzu.'} Zaleti se: što brže trčiš, to više skočiš. Odbij se od stabljike sa strane! Skokovi preko 2 i više katova zaredom slažu <b>kombo</b>: na kraju dobiješ katovi² bodova.</p>
+        ${window.BRK_OFFLINE ? '' : `<div class="kv-top" id="skTop">${skTopHtml()}</div>`}
+      </div>`;
+  }
+  function skTopHtml() {
+    const t = skTop;
+    const row = x => `<li class="${x.me ? 'mine' : ''}"><span class="kv-tr">${['🥇', '🥈', '🥉'][x.rank - 1] || x.rank + '.'}</span>${avatar({ av: x.av, name: x.name }, 'xs')}<span class="kv-tn">${esc(x.name)}</span><span class="muted sk-fl">${x.floor}. kat</span><b>${x.pts}</b></li>`;
+    let body = '<p class="muted">Učitavanje…</p>';
+    if (t) {
+      body = t.top.length ? `<ol class="kv-board">${t.top.map(row).join('')}${t.me && t.me.rank > t.top.length ? `<li class="gap">…</li>${row(t.me)}` : ''}</ol>` : '<p class="muted">Još nitko nema rezultat. Budi prvi/a!</p>';
+      body += `<p class="muted kv-tnote">${t.guest ? 'Imena na ljestvici vide samo prijavljeni. Prijavi se da ti se rekord pamti i da uđeš na ljestvicu.' : `Za svakih ${SH.EARN.skokPer} katova dobiješ 1 ${SH.cur(1)} (najviše ${SH.EARN.skokMax} po igri).`}</p>`;
+    }
+    return `<div class="kv-th">🏆 Ljestvica rekorda</div>${body}`;
+  }
+  function skTopPaint() { const el = document.getElementById('skTop'); if (el) el.innerHTML = skTopHtml(); }
+  function skTopAsk() { if (window.BRK_OFFLINE || Date.now() - skTopAt < 15000) return; skTopAt = Date.now(); getNet().send({ type: 'skokTop' }); }
+  function bindSkokPanel(needName) {
+    $app.querySelector('#playSkok').onclick = () => { needName(); startSkok(); };
+    skTopAsk();
+  }
+  function startSkok() {
+    if (skokRun) return;
+    document.body.classList.add('sk-on');
+    modal = null;
+    renderSideF();
+    skokRun = SK.play($app, {
+      sound: S.sound, beep, best: skBest(),
+      onEnd(res, extra) {
+        store.set('skokN', (store.get('skokN', 0) || 0) + 1);
+        if (res.floor > (store.get('skokFloor', 0) || 0)) store.set('skokFloor', res.floor);
+        if (res.score > (store.get('skokBest', 0) || 0)) store.set('skokBest', res.score);
+        const n = Math.min(SH.EARN.skokMax, Math.floor(res.floor / SH.EARN.skokPer));
+        if (loggedIn() && net && !window.BRK_OFFLINE) {
+          net.send({ type: 'skokEnd', score: res.score, floor: res.floor, ms: res.ms, combo: res.combo });
+          skTopAt = 0;
+          if (extra) extra.innerHTML = n ? `<p class="sk-duk">+${n} ${SH.cur(n)}</p>` : `<p class="muted">Dođi do ${SH.EARN.skokPer}. kata za prvi dukat.</p>`;
+        } else if (extra && !window.BRK_OFFLINE) extra.innerHTML = '<p class="muted">Prijavi se da ti se rekord pamti na računu i ljestvici (i za dukate).</p>';
+      },
+      onExit() { skokRun = null; document.body.classList.remove('sk-on'); render(); },
+    });
+  }
+
   // ---------- kviz Znalac ----------
   const KV_LET = ['A', 'B', 'C', 'D'];
   const kvLabel = o => (KVS ? KVS.label(o) : String(o)); // slika kao odgovor -> njezin naziv
@@ -2236,6 +2294,7 @@
       <p class="muted">Svaka partija pokera košta ulog od ${fmtChips(P.START_CHIPS)} žetona, a na kraju ti se na račun vrati ono s čim završiš (pobjednik dobije žetone svih igrača za stolom). Ako napustiš partiju prije kraja, gubiš ulog. Tko padne ispod ${fmtChips(1000)} žetona, dobije besplatnu dopunu do ${fmtChips(1000)}${acc.user.refills ? ` (dosad dopunjeno ${acc.user.refills}×)` : ''}.</p>` : ''}
       ${acc.user ? `<div class="wallet-box"><div>Dukati (za trgovinu)</div><b>${dukHtml(acc.user.duk)}</b></div>` : ''}
       ${acc.user ? kvizStatsHtml(acc.user.kviz) : ''}
+      ${acc.user && acc.user.skok && acc.user.skok.n ? `<div class="wallet-box"><div>🦗 ${SK.NAME}: rekord</div><b>${acc.user.skok.best}</b></div><p class="muted">Najviši kat ${acc.user.skok.floor}, najveći kombo ${acc.user.skok.combo || 0} katova, odigrano ${acc.user.skok.n} igara (${fmtTime(acc.user.skok.t)}).</p>` : ''}
       ${table('online', 'Online (s drugim igračima)')}
       ${table('bots', 'Protiv botova')}
       <p class="muted">Turnir se broji kao jedna partija (pobjeda = prvo mjesto), a njegove igre se broje i pod briškulom, trešetom i pokerom. Tko napusti online partiju prije kraja, upiše mu se poraz.</p>
@@ -2262,7 +2321,7 @@
     return what + ' · ' + modeName(k, +S.onMode, true);
   }
   function renderSideF() {
-    const show = !room && loggedIn() && !window.BRK_OFFLINE && !modal && !(dm.with && friendById(dm.with)) && !lobbyShown();
+    const show = !room && !skokRun && loggedIn() && !window.BRK_OFFLINE && !modal && !(dm.with && friendById(dm.with)) && !lobbyShown();
     document.body.classList.toggle('side-f', !!show);
     if (!show) { if (side.el) side.el.hidden = true; return; }
     if (!side.el) {

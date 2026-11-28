@@ -7,6 +7,7 @@
 // test/version.js provjerava da se broj slaže s package.json.
 (function () {
   const NOTES = [
+    { v: '1.27.0', d: '2026-11-28', t: 'Nova igra: Skakavac – skači po grančicama sve više prema nebu, slaži kombo skokove i obori rekord na ljestvici (mobitel i PC).' },
     { v: '1.26.0', d: '2026-11-27', t: 'Dnevna nagrada u kvizu: tko je u ponoć prvi na novoj ljestvici "Danas", dobiva 200 dukata za trgovinu.' },
     { v: '1.25.1', d: '2026-11-27', t: 'Statistika kviza: umjesto točnih odgovora po kategoriji sad piše broj odigranih partija (krugova) u svakoj kategoriji, plus Miješano.' },
     { v: '1.25.0', d: '2026-11-27', t: 'Više dukata: online pobjeda 50, protiv botova 5/10/15 i do 250 na dan, kviz 30/10, dnevni bonus 40.' },

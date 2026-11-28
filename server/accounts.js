@@ -248,6 +248,29 @@ function create(store) {
     /** zadnji dobitnik dnevne nagrade kviza ({ d, uid, pts } ili null) */
     kvDailyLast: () => { const h = (store.get('kvDaily') || {}).hist || []; return h[h.length - 1] || null; },
 
+    // ---------- Skakavac (igra skakanja): rekord, broj igara, vrijeme ----------
+    skokOf: u => (u && u.skok) || { best: 0, floor: 0, combo: 0, n: 0, t: 0 },
+    /** završena igra Skakavca (rezultat je već provjeren u serveru); vraća { best, rec } */
+    addSkok(u, score, floor, combo, ms) {
+      const k = u.skok || (u.skok = { best: 0, floor: 0, combo: 0, n: 0, t: 0, at: 0 });
+      const rec = score > k.best;
+      if (rec) { k.best = score; k.at = Date.now(); }
+      if (floor > k.floor) k.floor = floor;
+      if (combo > k.combo) k.combo = combo;
+      k.n++; k.t += Math.min(Math.max(0, ms), MAX_GAME_MS);
+      save(u);
+      return { best: k.best, rec };
+    },
+    /** ljestvica Skakavca: najboljih n po rekordu + mjesto zadanog korisnika */
+    skokTop(n, me) {
+      const all = [];
+      for (const [k, u] of store.docs) if (k.startsWith('user:') && u.skok && u.skok.best > 0) all.push(u);
+      all.sort((a, b) => b.skok.best - a.skok.best || (a.skok.at || 0) - (b.skok.at || 0) || a.id - b.id);
+      const row = (u, i) => ({ u, pts: u.skok.best, floor: u.skok.floor, rank: i + 1 });
+      const mi = me ? all.findIndex(u => u.id === me.id) : -1;
+      return { top: all.slice(0, n).map(row), me: mi >= 0 ? row(all[mi], mi) : null, players: all.length };
+    },
+
     // ---------- žetoni (poker) ----------
     chipsOf: u => (u && Number.isFinite(u.chips) ? u.chips : WALLET_START),
     /** promjena stanja žetona nakon partije pokera; vraća novo stanje */

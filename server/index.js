@@ -601,6 +601,15 @@ function kvTopMsg(c, cat) {
   }
   return { type: 'kvTop', cat, top, me: t.me ? row(t.me) : null, players: t.players, guest: !me, last, prize: Shop.EARN.kvizDay, imgs: newImgs(c, top.map(x => x.av)) };
 }
+// ljestvica Skakavca (rekordi); gosti ne vide imena, kao kod kviza
+function skokTopMsg(c) {
+  const me = c && c.uid && ACC.user(c.uid);
+  const t = ACC.skokTop(10, me);
+  const row = x => !me ? { name: 'Igrač ' + x.rank, av: AV.forName('Igrač ' + x.rank), pts: x.pts, floor: x.floor, rank: x.rank, me: false }
+    : { name: x.u.name || x.u.uname, av: x.u.av === 'img' && x.u.img ? 'i:' + storeImg(x.u.img) : x.u.av || AV.forName(x.u.name || x.u.uname), pts: x.pts, floor: x.floor, rank: x.rank, me: x.u.id === me.id };
+  const top = t.top.map(row);
+  return { type: 'skokTop', top, me: t.me ? row(t.me) : null, players: t.players, guest: !me, imgs: newImgs(c, top.map(x => x.av)) };
+}
 // dnevna nagrada kviza: obračun u ponoć (provjera svakih 30 s, a nakon buđenja servera nadoknadi propušteno)
 ACC.onKvDaily = x => pushAccount(x.u.id);
 setInterval(() => ACC.kvDailySettle(), 30e3).unref();
@@ -792,7 +801,7 @@ function accountMsg(u, c, withImg) {
   const fv = friendsView(u, c);
   return {
     type: 'account', storage: ACC.kind,
-    user: Object.assign({ id: u.id, uname: u.uname, name: u.name, av: u.av, stats: u.stats, chips: ACC.chipsOf(u), refills: u.refills || 0, chipsLast: u.chipsLast || null, lobbyAdmin: isAdmin(u), admin: isAppAdmin(u), sugN: isAppAdmin(u) ? ACC.sugGet().m.filter(s => !s.done).length : 0, tempPass: !!u.tempPass, kviz: ACC.kvizOf(u), duk: ACC.dukOf(u), dukLast: u.dukLast || null, kvWin: u.kvWin || null, inv: ACC.invOf(u), eq: ACC.eqOf(u) }, withImg ? { img: u.img } : {}),
+    user: Object.assign({ id: u.id, uname: u.uname, name: u.name, av: u.av, stats: u.stats, chips: ACC.chipsOf(u), refills: u.refills || 0, chipsLast: u.chipsLast || null, lobbyAdmin: isAdmin(u), admin: isAppAdmin(u), sugN: isAppAdmin(u) ? ACC.sugGet().m.filter(s => !s.done).length : 0, tempPass: !!u.tempPass, kviz: ACC.kvizOf(u), skok: ACC.skokOf(u), duk: ACC.dukOf(u), dukLast: u.dukLast || null, kvWin: u.kvWin || null, inv: ACC.invOf(u), eq: ACC.eqOf(u) }, withImg ? { img: u.img } : {}),
     friends: fv.list, imgs: fv.imgs,
   };
 }
@@ -1137,6 +1146,23 @@ function accountMessage(m, token, c, ws, ip) {
       for (const t of tokensOf(u.id)) { const tc = clients.get(t), tr = tc && tc.room && rooms.get(tc.room); if (tr) broadcast(tr); }
       return;
     }
+    case 'skokEnd': {
+      // završena igra Skakavca (igra se u pregledniku, pa server samo provjeri je li rezultat moguć)
+      if (!u) return;
+      const floor = Math.floor(+m.floor), score = Math.floor(+m.score), ms = Math.floor(+m.ms), combo = Math.floor(+m.combo) || 0;
+      if (![floor, score, ms].every(Number.isFinite) || floor < 0 || score < 0 || ms < 1000) return;
+      // najviše ~10 katova u sekundi; bodovi = 10 po katu + kvadrati kombo skokova (ne više od kat²)
+      if (floor > 20 + ms / 100 || score > floor * 10 + floor * floor || combo > floor) return;
+      const now = Date.now();
+      if (now - (c.skokAt || 0) < Math.min(ms, 3000)) return;
+      c.skokAt = now;
+      const res = ACC.addSkok(u, score, floor, Math.max(0, combo), ms);
+      const n = Math.min(Shop.EARN.skokMax, Math.floor(floor / Shop.EARN.skokPer));
+      if (n) ACC.addDuk(u, n, 'Skakavac: ' + floor + '. kat', true);
+      send(ws, { type: 'skokSaved', best: res.best, rec: res.rec });
+      pushAccount(u.id);
+      return;
+    }
     case 'stat': {
       // partija protiv botova u pregledniku (server je ne vidi, pa vjeruje klijentu)
       if (!u) return;
@@ -1159,7 +1185,7 @@ function accountMessage(m, token, c, ws, ip) {
     }
   }
 }
-const ACCOUNT_MSGS = new Set(['register', 'login', 'logout', 'account', 'password', 'friendAdd', 'friendAccept', 'friendRemove', 'invite', 'stat', 'adminReset', 'history', 'game', 'userInfo', 'shopBuy', 'shopEquip', ...DM_MSGS, ...SUG_MSGS]);
+const ACCOUNT_MSGS = new Set(['skokEnd', 'register', 'login', 'logout', 'account', 'password', 'friendAdd', 'friendAccept', 'friendRemove', 'invite', 'stat', 'adminReset', 'history', 'game', 'userInfo', 'shopBuy', 'shopEquip', ...DM_MSGS, ...SUG_MSGS]);
 
 wss.on('connection', (ws, req) => {
   let token = null;
@@ -1201,6 +1227,7 @@ wss.on('connection', (ws, req) => {
     if (LOBBY_MSGS.has(m.type)) return lobbyMessage(m, c, ws);
     if (m.type === 'kvList') { c.kvList = !m.off; if (c.kvList) send(ws, kvListMsg()); return; }
     if (m.type === 'kvTop') return send(ws, kvTopMsg(c, m.cat));
+    if (m.type === 'skokTop') return send(ws, skokTopMsg(c));
     if (c.kvRoom && KVR_MSGS.has(m.type)) return kvrMessage(m, token, c, ws);
     if (ACCOUNT_MSGS.has(m.type)) {
       if (!ACC.isReady()) return m.type === 'login' || m.type === 'register' ? send(ws, { type: 'authError', msg: 'Računi trenutno nisu dostupni (baza se spaja). Pokušaj za minutu.' }) : undefined;

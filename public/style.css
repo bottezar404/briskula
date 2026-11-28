@@ -1102,3 +1102,8 @@ body.sk-on #app { padding: 0; }
 .sk-card .row button { flex: 1; }
 .sk-duk { font-weight: 800; color: var(--gold); margin: 6px 0 0; }
 .sk-hint { font-size: 12px; margin: 10px 0 0; }
+.sk-panel .seg { margin-bottom: 8px; }
+.sk-joy { position: absolute; width: 0; height: 0; pointer-events: none; z-index: 2; }
+.sk-joy.hid { display: none; }
+.sk-joy::before { content: ''; position: absolute; left: -60px; top: -22px; width: 120px; height: 44px; border-radius: 22px; background: rgba(255,255,255,.18); border: 2px solid rgba(255,255,255,.4); }
+.sk-joy span { position: absolute; left: -22px; top: -22px; width: 44px; height: 44px; border-radius: 50%; background: rgba(229,199,122,.75); box-shadow: 0 2px 8px rgba(0,0,0,.3); }

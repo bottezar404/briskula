@@ -35,22 +35,50 @@
   }
   /** platforma na katu i: { i, y (vrh), x0, x1 } */
   function plat(g, i) {
-    let p = g.plats.get(i);
-    if (p) return p;
     const L = WALL, R = W - WALL;
+    let p = g.plats.get(i);
+    if (p) return p.kind === 'move' ? movePlat(g, p) : p;
     if (i === 0 || i % 50 === 0) p = { i, x0: L, x1: R };
     else {
       const r1 = hash(g.seed * 7919 + i * 31), r2 = hash(g.seed * 104729 + i * 17 + 3);
       const wBase = Math.max(78, 230 - i * 0.55);
       const w = Math.min(R - L, wBase + (r1 - 0.5) * 70);
       const x0 = L + r2 * (R - L - w);
-      p = { i, x0, x1: x0 + w };
+      p = { i, x0, x1: x0 + w, w, kind: 'n' };
+      // prepreke: od 40. kata grančice koje se slome, od 60. pomične
+      const r3 = hash(g.seed * 31337 + i * 13 + 7);
+      const pm = i >= 60 ? Math.min(0.25, 0.08 + (i - 60) * 0.002) : 0, pc = i >= 40 ? Math.min(0.3, 0.1 + (i - 40) * 0.003) : 0;
+      if (r3 < pm) { p.kind = 'move'; p.ph = r3 * 60; p.sp = 0.012 + hash(i * 3 + g.seed) * 0.012; }
+      else if (r3 >= pm && r3 < pm + pc) p.kind = 'crumble';
+      // dodaci: zvjezdica (+25) ili gljiva-opruga (super skok)
+      const r4 = hash(g.seed * 4241 + i * 19 + 11);
+      if (i >= 15 && r4 < 0.05) p.item = { t: 'spring', f: 0.2 + hash(i * 7 + 1) * 0.6 };
+      else if (i >= 6 && r4 < 0.24) p.item = { t: 'star', f: 0.15 + hash(i * 5 + 2) * 0.7 };
+      // neprijatelji: ose lete lijevo-desno između katova (od 25. kata, sve češće)
+      const r5 = hash(g.seed * 977 + i * 23 + 5);
+      if (i >= 25 && r5 < Math.min(0.3, 0.06 + i * 0.0012)) p.wasp = { ph: r5 * 80, sp: 0.018 + hash(i * 11 + 4) * 0.02 };
     }
     p.y = -i * FH;
     g.plats.set(i, p);
     if (g.plats.size > 400) for (const k of g.plats.keys()) { if (k < i - 60 || k > i + 60) g.plats.delete(k); if (g.plats.size < 200) break; }
+    return p.kind === 'move' ? movePlat(g, p) : p;
+  }
+  function movePlat(g, p) {
+    const L = WALL, R = W - WALL;
+    if (p.tu !== g.t) {
+      // pomična grančica: klizi po cijeloj širini; dx = pomak u ovoj sličici (nosi skakavca)
+      const x0 = L + (R - L - p.w) * (0.5 + 0.5 * Math.sin(g.t * p.sp + p.ph));
+      p.dx = p.tu == null ? 0 : x0 - p.x0; p.x0 = x0; p.x1 = x0 + p.w; p.tu = g.t;
+    }
     return p;
   }
+  /** položaj ose na katu i (između kata i i i+1) */
+  function waspPos(g, p) {
+    const L = WALL + 18, R = W - WALL - 18;
+    return { x: L + (R - L) * (0.5 + 0.5 * Math.sin(g.t * p.wasp.sp + p.wasp.ph)), y: p.y - FH * 0.55, dir: Math.cos(g.t * p.wasp.sp + p.wasp.ph) >= 0 ? 1 : -1 };
+  }
+  const itemX = p => p.x0 + (p.x1 - p.x0) * p.item.f;
+  const SPRING_V = 30;
 
   function newGame(seed, viewH) {
     return {
@@ -59,7 +87,7 @@
       cam: -(viewH || 760) + 90, // vrh pogleda (y prema gore je negativan)
       t: 0, startT: -1, level: 0, maxFloor: 0, bonus: 0,
       combo: { jumps: 0, floors: 0, timer: 0 }, bestCombo: 0, combos: 0,
-      over: false, events: [], prevJ: false,
+      over: false, events: [], prevJ: false, stars: 0, inv: 0, hits: 0, springs: 0,
     };
   }
   const score = g => g.maxFloor * 10 + g.bonus;
@@ -79,8 +107,9 @@
   function step(g, inp) {
     if (g.over) return g;
     g.t++;
-    const dir = (inp.r ? 1 : 0) - (inp.l ? 1 : 0);
-    if (dir) { g.vx += dir * (g.ground ? ACC_G : ACC_A); g.face = dir; }
+    // inp.ax (-1..1) = upravljanje prstom (jačina), inače tipke lijevo/desno
+    const dir = typeof inp.ax === 'number' ? Math.max(-1, Math.min(1, inp.ax)) : (inp.r ? 1 : 0) - (inp.l ? 1 : 0);
+    if (dir) { g.vx += dir * (g.ground ? ACC_G : ACC_A); g.face = dir > 0 ? 1 : -1; }
     else if (g.ground) { g.vx *= 0.8; if (Math.abs(g.vx) < 0.05) g.vx = 0; }
     else g.vx *= 0.995;
     if (g.vx > VX_MAX) g.vx = VX_MAX; else if (g.vx < -VX_MAX) g.vx = -VX_MAX;
@@ -108,13 +137,39 @@
         const i = Math.floor(-py / FH);
         if (i >= 0) {
           const p = plat(g, i);
-          if (py <= p.y && g.y >= p.y && g.x + PW * 0.35 > p.x0 && g.x - PW * 0.35 < p.x1) land(g, p);
+          if (!p.gone && py <= p.y && g.y >= p.y && g.x + PW * 0.35 > p.x0 && g.x - PW * 0.35 < p.x1) land(g, p);
         }
       }
       if (g.combo.jumps && !g.ground) g.rot += g.vx >= 0 ? 0.28 : -0.28;
     } else {
       const p = plat(g, g.floor);
-      if (g.x + PW * 0.35 < p.x0 || g.x - PW * 0.35 > p.x1) { g.ground = false; g.vy = 0; g.jumpFrom = g.floor; }
+      if (p.kind === 'move') g.x = Math.max(L, Math.min(R, g.x + p.dx));
+      if (p.gone || g.x + PW * 0.35 < p.x0 || g.x - PW * 0.35 > p.x1) { g.ground = false; g.vy = 0; g.jumpFrom = g.floor; }
+    }
+    // grančice koje se lome: 0,7 s nakon doskoka padnu
+    for (let i = Math.max(1, g.floor - 2); i <= g.floor + 1; i++) {
+      const p = plat(g, i);
+      if (p.crumbleAt != null && !p.gone && g.t - p.crumbleAt > 42) { p.gone = true; g.events.push({ e: 'crumble', i }); }
+    }
+    // zvjezdice i ose u blizini
+    if (g.inv > 0) g.inv--;
+    const f0 = Math.max(0, Math.floor(-g.y / FH) - 2), f1 = f0 + 6;
+    for (let i = f0; i <= f1; i++) {
+      const p = plat(g, i);
+      if (p.item && p.item.t === 'star' && !p.item.got) {
+        const sx = itemX(p), sy = p.y - 24;
+        if (Math.abs(sx - g.x) < 22 && sy > g.y - PH - 14 && sy < g.y + 10) { p.item.got = true; g.stars++; g.bonus += 25; g.events.push({ e: 'star', x: sx, y: sy }); }
+      }
+      if (p.wasp && !g.inv) {
+        const w = waspPos(g, p);
+        if (Math.abs(w.x - g.x) < PW * 0.5 + 10 && w.y > g.y - PH - 10 && w.y < g.y + 8) {
+          // ubod: skakavca odbaci dolje i u stranu, kombo propada
+          g.inv = 70; g.hits++;
+          g.vx = (g.x < w.x ? -1 : 1) * 5; if (!g.ground) g.vy = Math.max(g.vy, 4);
+          if (g.combo.jumps) { g.combo.jumps = 0; g.combo.floors = 0; g.combo.timer = 0; g.events.push({ e: 'comboLost' }); }
+          g.events.push({ e: 'hit', x: w.x, y: w.y });
+        }
+      }
     }
     // kombo istječe
     if (g.combo.jumps && --g.combo.timer <= 0) endCombo(g);
@@ -145,9 +200,15 @@
       g.combo.jumps++; g.combo.floors += diff; g.combo.timer = COMBO_T;
     } else if (g.combo.jumps) endCombo(g);
     g.events.push({ e: 'land', diff, floor: p.i });
+    if (p.kind === 'crumble' && p.crumbleAt == null) p.crumbleAt = g.t;
+    // gljiva-opruga: odbaci jako visoko
+    if (p.item && p.item.t === 'spring' && Math.abs(itemX(p) - g.x) < 22) {
+      g.vy = -SPRING_V; g.ground = false; g.jumpFrom = p.i; g.springs++;
+      g.events.push({ e: 'spring' });
+    }
   }
 
-  const Engine = { W, WALL, FH, PW, PH, COMBO_T, START_FLOOR, LEVEL_T, MAX_LEVEL, ZONES, zoneOf, speedOf, newGame, step, plat, score };
+  const Engine = { waspPos, itemX, SPRING_V, W, WALL, FH, PW, PH, COMBO_T, START_FLOOR, LEVEL_T, MAX_LEVEL, ZONES, zoneOf, speedOf, newGame, step, plat, score };
 
   // ================= crtanje i upravljanje (samo u pregledniku) =================
   function lerpHex(a, b, t) {
@@ -169,8 +230,12 @@
   }
 
   function drawPlat(ctx, p, sy, t) {
-    const z = zoneOf(p.i), x = p.x0, w = p.x1 - p.x0;
-    const big = p.i % 50 === 0;
+    if (p.gone) return;
+    const z = zoneOf(p.i);
+    let x = p.x0;
+    const w = p.x1 - p.x0, big = p.i % 50 === 0;
+    ctx.save();
+    if (p.crumbleAt != null) { const k = (t - p.crumbleAt) / 42; x += Math.sin(t * 1.7) * 2.5 * k; sy += k * k * 10; ctx.globalAlpha = Math.max(0.15, 1 - k * 0.8); }
     switch (z.plat) {
       case 'grass':
         ctx.fillStyle = '#8a5a2b'; rr(ctx, x, sy, w, 16, 6); ctx.fill();
@@ -203,6 +268,14 @@
         ctx.fillStyle = 'rgba(255,255,255,.55)'; ctx.fillRect(x + 4, sy + 2, w - 8, 3);
       }
     }
+    if (p.kind === 'crumble') { // pukotine: ova grančica se slomi
+      ctx.strokeStyle = 'rgba(40,20,0,.75)'; ctx.lineWidth = 2;
+      for (let k = x + w * 0.25; k < x + w - 8; k += w * 0.3) { ctx.beginPath(); ctx.moveTo(k, sy - 2); ctx.lineTo(k + 5, sy + 6); ctx.lineTo(k - 2, sy + 10); ctx.lineTo(k + 4, sy + 15); ctx.stroke(); }
+    } else if (p.kind === 'move') { // strelice: pomična grančica
+      ctx.fillStyle = 'rgba(255,255,255,.85)'; ctx.font = 'bold 12px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('◀ ▶', x + w / 2, sy + 8);
+    }
+    ctx.restore();
     // oznaka kata (svaki deseti)
     if (p.i && p.i % 10 === 0) {
       const lab = String(p.i);
@@ -212,6 +285,41 @@
       ctx.fillStyle = big ? '#4a2c00' : '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.fillText(lab, lx + tw / 2, sy + 27.5);
     }
+  }
+
+  function drawStar(ctx, x, y, r, t) {
+    ctx.save(); ctx.translate(x, y + Math.sin(t / 10 + x) * 3); ctx.rotate(Math.sin(t / 20) * 0.3);
+    ctx.fillStyle = '#ffd23f'; ctx.strokeStyle = '#b8860b'; ctx.lineWidth = 2;
+    ctx.beginPath();
+    for (let k = 0; k < 10; k++) { const a = -Math.PI / 2 + k * Math.PI / 5, rr2 = k % 2 ? r * 0.45 : r; ctx.lineTo(Math.cos(a) * rr2, Math.sin(a) * rr2); }
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.restore();
+  }
+  function drawSpring(ctx, x, y, t, boing) {
+    // gljiva-opruga: crveni klobuk s bijelim točkama (stisne se kad netko odskoči)
+    const sq = boing > 0 ? 1 - boing / 30 : 1;
+    ctx.save(); ctx.translate(x, y);
+    ctx.fillStyle = '#f3e7c9'; rr(ctx, -6, -14 * sq, 12, 14 * sq, 4); ctx.fill();
+    ctx.translate(0, -14 * sq);
+    ctx.fillStyle = '#e2473b'; ctx.beginPath(); ctx.ellipse(0, 0, 18, 11 * sq, 0, Math.PI, 0); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#fff'; for (const [a, b, r2] of [[-8, -4, 2.6], [3, -7, 2.2], [10, -2, 2]]) { ctx.beginPath(); ctx.arc(a, b * sq, r2, 0, 7); ctx.fill(); }
+    ctx.restore();
+  }
+  function drawWasp(ctx, x, y, dir, t) {
+    ctx.save(); ctx.translate(x, y + Math.sin(t / 6) * 3); ctx.scale(dir, 1);
+    // krila (mašu)
+    ctx.fillStyle = 'rgba(220,240,255,.8)';
+    const fl = Math.sin(t * 0.9) * 0.5;
+    ctx.beginPath(); ctx.ellipse(-2, -9, 6, 10, -0.6 + fl, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(4, -9, 5, 9, 0.5 - fl, 0, 7); ctx.fill();
+    // tijelo s prugama
+    ctx.fillStyle = '#ffc61a'; ctx.beginPath(); ctx.ellipse(0, 0, 13, 8, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = '#222'; ctx.fillRect(-6, -7, 3.5, 14); ctx.fillRect(0, -8, 3.5, 16);
+    ctx.beginPath(); ctx.moveTo(-13, 0); ctx.lineTo(-19, 2); ctx.lineTo(-12, 3); ctx.fill(); // žalac
+    ctx.beginPath(); ctx.arc(11, -1, 5.5, 0, 7); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(13, -2.5, 2, 0, 7); ctx.fill();
+    ctx.strokeStyle = '#222'; ctx.lineWidth = 1.4; ctx.beginPath(); ctx.moveTo(13, -6); ctx.lineTo(17, -11); ctx.stroke();
+    ctx.restore();
   }
 
   function drawHopper(ctx, g, sx, sy) {
@@ -254,10 +362,13 @@
   function play(host, opts) {
     opts = opts || {};
     const isTouch = matchMedia('(pointer: coarse)').matches;
+    // na mobitelu: 'prst' = povlačenje prstom po ekranu (zadano) ili 'gumbi'; auto = skače sam
+    const drag = isTouch && opts.ctrl !== 'gumbi', auto = !!opts.auto;
     host.innerHTML = `<div class="sk-wrap">
       <canvas class="sk-cv" aria-label="Skakavac"></canvas>
       <div class="sk-top"><button class="sk-btn sk-x" data-sk="exit" aria-label="Izađi">✕</button><button class="sk-btn sk-p" data-sk="pause" aria-label="Pauza">❚❚</button></div>
-      <div class="sk-pad${isTouch ? '' : ' hid'}">
+      <div class="sk-joy hid"><span></span></div>
+      <div class="sk-pad${isTouch && !drag ? '' : ' hid'}">
         <button class="sk-k" data-k="l" aria-label="Lijevo">◀</button><button class="sk-k" data-k="r" aria-label="Desno">▶</button>
         <button class="sk-k sk-j" data-k="j" aria-label="Skok">SKOK</button>
       </div>
@@ -288,6 +399,7 @@
       fx = []; msgs = []; dead = false; paused = false; ov.classList.add('hid');
       msgs.push({ t: '↑ Penji se što više!', y: H * 0.42, life: 120, size: 26, col: '#fff' });
       last = performance.now(); acc = 0;
+      sync();
     }
     function say(t, col, size, life) { msgs.push({ t, y: H * 0.36, life: life || 90, size: size || 30, col: col || '#fff' }); }
     function handle(ev) {
@@ -305,6 +417,11 @@
         beep(660, 0.08, 'square'); setTimeout(() => beep(990, 0.12, 'square'), 90);
       } else if (ev.e === 'start') say('Kreće! Ne zaostaj', '#fff', 24, 100);
       else if (ev.e === 'faster') { say(ev.level >= MAX_LEVEL ? 'Najveća brzina!' : 'Brže!', '#ff8b6b', 34, 100); flash = 20; beep(330, 0.12, 'sawtooth'); setTimeout(() => beep(440, 0.12, 'sawtooth'), 130); }
+      else if (ev.e === 'star') { beep(1200, 0.06, 'sine'); for (let k = 0; k < 8; k++) fx.push({ x: ev.x, y: ev.y, vx: (Math.random() - 0.5) * 5, vy: -Math.random() * 4, life: 25, c: '#ffd23f', star: 1 }); }
+      else if (ev.e === 'spring') { const p = plat(g, g.floor); p.boing = 30; beep(300, 0.25, 'sine'); setTimeout(() => beep(700, 0.15, 'sine'), 80); say('Boing!', '#ff8bd0', 26, 60); }
+      else if (ev.e === 'hit') { shake = 8; flash = 12; beep(160, 0.2, 'sawtooth'); say('Au! Osa!', '#ff6b4a', 26, 70); }
+      else if (ev.e === 'comboLost') say('Kombo izgubljen', '#ffb199', 18, 70);
+      else if (ev.e === 'crumble') beep(140, 0.12, 'triangle');
       else if (ev.e === 'over') { shake = 14; beep(200, 0.3, 'sawtooth'); }
     }
     function frame(now) {
@@ -345,7 +462,14 @@
       }
       // platforme
       const i0 = Math.max(0, Math.floor(-(cam + H) / FH) - 1), i1 = Math.floor(-cam / FH) + 1;
-      for (let i = i0; i <= i1; i++) { const p = plat(g, i); drawPlat(ctx, p, p.y - cam, g.t); }
+      for (let i = i0; i <= i1; i++) {
+        const p = plat(g, i); drawPlat(ctx, p, p.y - cam, g.t);
+        if (p.item && !p.gone) {
+          if (p.item.t === 'star' && !p.item.got) drawStar(ctx, Engine.itemX(p), p.y - 24 - cam, 11, g.t);
+          else if (p.item.t === 'spring') drawSpring(ctx, Engine.itemX(p), p.y - cam, g.t, p.boing ? p.boing-- : 0);
+        }
+      }
+      for (let i = i0; i <= i1 + 1; i++) { const p = plat(g, i); if (p.wasp) { const w = Engine.waspPos(g, p); drawWasp(ctx, w.x, w.y - cam, w.dir, g.t); } }
       // stabljike sa strane
       for (const sx of [0, W - WALL]) {
         ctx.fillStyle = '#3f8f2c'; ctx.fillRect(sx, 0, WALL, H);
@@ -363,7 +487,7 @@
         else { ctx.beginPath(); ctx.arc(p.x, p.y - cam, 2.5, 0, 7); ctx.fill(); }
       }
       ctx.globalAlpha = 1; fx = fx.filter(p => p.life > 0);
-      drawHopper(ctx, g, g.x, g.y - cam);
+      if (!(g.inv && Math.floor(g.inv / 5) % 2)) drawHopper(ctx, g, g.x, g.y - cam);
       ctx.restore();
       if (flash > 0) { ctx.fillStyle = `rgba(255,120,90,${flash / 60})`; ctx.fillRect(0, 0, W, H); flash--; }
       hud();
@@ -408,6 +532,11 @@
         ctx.strokeText(m.t, W / 2, m.y); ctx.fillStyle = m.col; ctx.fillText(m.t, W / 2, m.y);
       }
       ctx.globalAlpha = 1; msgs = msgs.filter(m => m.life > 0);
+      if (isTouch && g.t < 360 && !g.maxFloor) {
+        ctx.font = '15px system-ui, sans-serif'; ctx.fillStyle = 'rgba(0,0,0,.6)';
+        ctx.fillText(drag ? 'Povuci prst lijevo-desno bilo gdje po ekranu' : 'Gumbi ◀ ▶ za trčanje', W / 2, H - 70);
+        ctx.fillText(auto ? 'Skakavac skače sam · zaleti se za viši skok!' : drag ? 'Kratki dodir ili drugi prst = skok' : 'SKOK za skok', W / 2, H - 48);
+      }
       if (!isTouch && g.t < 300 && !g.maxFloor) {
         ctx.font = '14px system-ui, sans-serif'; ctx.fillStyle = 'rgba(0,0,0,.55)';
         ctx.fillText('← → hodanje · razmak ili ↑ skok · P pauza', W / 2, H - 60);
@@ -424,7 +553,7 @@
         <p class="muted">${rec ? (best ? `Prijašnji rekord: ${best}` : 'Prvi rezultat je zapisan.') : `Tvoj rekord: ${best}`} · ${zoneOf(res.floor).name}</p>
         <div class="sk-extra"></div>
         <div class="row"><button data-sk="again">Igraj ponovno</button><button class="ghost" data-sk="exit">Izbornik</button></div>
-        <p class="muted sk-hint">${isTouch ? 'Ili dodirni SKOK' : 'Ili pritisni razmak'} za novu igru</p>
+        <p class="muted sk-hint">${isTouch ? (drag ? '' : 'Ili dodirni SKOK za novu igru') : 'Ili pritisni razmak za novu igru'}</p>
       </div>`;
       ov.classList.remove('hid');
       if (rec) opts.best = res.score;
@@ -443,7 +572,48 @@
     }
     // ---------- upravljanje ----------
     const KEYMAP = { ArrowLeft: 'l', KeyA: 'l', ArrowRight: 'r', KeyD: 'r', ArrowUp: 'j', KeyW: 'j', Space: 'j' };
-    const sync = () => { inp.l = keys.has('l') || padKeys.has('l'); inp.r = keys.has('r') || padKeys.has('r'); inp.j = keys.has('j') || padKeys.has('j'); };
+    const sync = () => {
+      inp.l = keys.has('l') || padKeys.has('l'); inp.r = keys.has('r') || padKeys.has('r');
+      inp.ax = dragId != null ? dragAx : undefined;
+      inp.j = auto || keys.has('j') || padKeys.has('j') || tapJ > performance.now() || jumpPtrs.size > 0;
+    };
+    // povlačenje prstom: gdje god dodirneš ekran, to je sredina; pomak lijevo/desno = trčanje (jače što dalje)
+    const joy = host.querySelector('.sk-joy'), knob = joy.querySelector('span');
+    let dragId = null, dragX0 = 0, dragAx = 0, downAt = 0, downX = 0, moved = 0, tapJ = 0;
+    const jumpPtrs = new Set();
+    const JOY = 56;
+    if (drag) {
+      wrap.addEventListener('pointerdown', e => {
+        if (e.target.closest('button') || !ov.classList.contains('hid')) return;
+        e.preventDefault();
+        if (dragId != null) { if (!auto) { jumpPtrs.add(e.pointerId); sync(); } return; } // drugi prst = skok
+        dragId = e.pointerId; dragX0 = e.clientX; dragAx = 0; downAt = performance.now(); downX = e.clientX; moved = 0;
+        try { wrap.setPointerCapture(e.pointerId); } catch { }
+        const r = wrap.getBoundingClientRect();
+        joy.style.left = (e.clientX - r.left) + 'px'; joy.style.top = (e.clientY - r.top) + 'px';
+        knob.style.transform = 'translateX(0px)'; joy.classList.remove('hid');
+        sync();
+      });
+      wrap.addEventListener('pointermove', e => {
+        if (e.pointerId !== dragId) return;
+        let dx = e.clientX - dragX0;
+        moved = Math.max(moved, Math.abs(e.clientX - downX));
+        // sredina ide za prstom kad odeš predaleko, pa je promjena smjera odmah
+        if (Math.abs(dx) > JOY) { dragX0 += dx - Math.sign(dx) * JOY; dx = Math.sign(dx) * JOY; const r = wrap.getBoundingClientRect(); joy.style.left = (dragX0 - r.left) + 'px'; }
+        dragAx = Math.abs(dx) < 6 ? 0 : Math.max(-1, Math.min(1, dx / 34));
+        knob.style.transform = `translateX(${dx}px)`;
+        sync();
+      });
+      const end = e => {
+        if (jumpPtrs.delete(e.pointerId)) { sync(); return; }
+        if (e.pointerId !== dragId) return;
+        // kratki dodir bez pomicanja = skok (kad nije automatski)
+        if (!auto && performance.now() - downAt < 220 && moved < 12) tapJ = performance.now() + 120;
+        dragId = null; dragAx = 0; joy.classList.add('hid');
+        sync();
+      };
+      wrap.addEventListener('pointerup', end); wrap.addEventListener('pointercancel', end);
+    }
     const onKey = e => {
       if (e.target && /INPUT|TEXTAREA/.test(e.target.tagName)) return;
       const k = KEYMAP[e.code];
@@ -495,6 +665,7 @@
       },
       get game() { return g; },
     };
+    play.last = api; // za testove u pregledniku
     return api;
   }
 

@@ -1,4 +1,4 @@
-const CACHE = 'briskula-v46';
+const CACHE = 'briskula-v47';
 const ASSETS = ['./', 'index.html', 'style.css', 'app.js', 'engine.js', 'bot.js', 'treseta.js', 'treseta-bot.js', 'poker.js', 'poker-bot.js', 'turnir.js', 'covjece.js', 'covjece-bot.js', 'kviz-slike.js', 'kviz-pitanja.js', 'kviz.js', 'kviz-bot.js', 'skok.js', 'cards.js', 'avatars.js', 'version.js', 'shop.js', 'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-180.png'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', e => {

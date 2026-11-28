@@ -73,10 +73,72 @@ const run = (g, inp, n) => { for (let i = 0; i < n && !g.over; i++) SK.step(g, t
   assert.strictEqual(h.level, 4, 'svakih 30 s brže');
   assert(SK.speedOf(4) > SK.speedOf(1));
 }
+{ // prepreke i dodaci: deterministični, na pravim katovima
+  const g = SK.newGame(1234);
+  let crumble = 0, move = 0, star = 0, spring = 0, wasp = 0;
+  for (let i = 1; i < 400; i++) {
+    const p = SK.plat(g, i);
+    if (p.kind === 'crumble') { crumble++; assert(i >= 40); }
+    if (p.kind === 'move') { move++; assert(i >= 60); }
+    if (p.item && p.item.t === 'star') { star++; assert(i >= 6); }
+    if (p.item && p.item.t === 'spring') { spring++; assert(i >= 15); }
+    if (p.wasp) { wasp++; assert(i >= 25); }
+    if (i % 50 === 0) assert(p.kind === undefined && !p.item && !p.wasp, 'veliki katovi su mirni');
+  }
+  assert(crumble > 20 && move > 10 && star > 30 && spring > 3 && wasp > 20, `ima svega: ${crumble} ${move} ${star} ${spring} ${wasp}`);
+}
+const findPlat = (g, f, from) => { for (let i = from || 1; i < 600; i++) { const p = SK.plat(g, i); if (f(p)) return p; } };
+const putOn = (g, p, x) => { g.x = x == null ? (p.x0 + p.x1) / 2 : x; g.ground = false; g.y = p.y - 5; g.vy = 6; g.floor = p.i - 1; SK.step(g, {}); };
+{ // grančica koja se lomi: nakon ~0,7 s nestane i skakavac padne
+  const g = SK.newGame(1234);
+  const p = findPlat(g, p => p.kind === 'crumble' && !p.item);
+  putOn(g, p); assert(g.ground && g.floor === p.i);
+  run(g, {}, 50);
+  assert(p.gone && !g.ground, 'slomila se');
+}
+{ // pomična grančica nosi skakavca
+  const g = SK.newGame(1234);
+  const p = findPlat(g, p => p.kind === 'move' && !p.item);
+  putOn(g, p); const x0 = p.x0, gx = g.x;
+  run(g, {}, 20);
+  assert(p.x0 !== x0, 'pomiče se');
+  assert(Math.abs((g.x - gx) - (p.x0 - x0)) < 1.5, 'nosi skakavca');
+}
+{ // gljiva-opruga baci jako visoko; zvjezdica +25
+  const g = SK.newGame(1234);
+  const p = findPlat(g, p => p.item && p.item.t === 'spring' && p.kind !== 'crumble');
+  putOn(g, p, SK.itemX(p));
+  assert(!g.ground && g.vy < -25 && g.springs === 1, 'odskok');
+  let top = g.y; while (g.vy < 0) { SK.step(g, {}); top = Math.min(top, g.y); }
+  assert(p.y - top > SK.FH * 6, 'barem 6 katova');
+  const h = SK.newGame(1234);
+  const q = findPlat(h, p => p.item && p.item.t === 'star' && p.kind !== 'crumble');
+  putOn(h, q, SK.itemX(q));
+  run(h, {}, 2);
+  assert(q.item.got && h.stars === 1 && h.bonus === 25, 'zvjezdica');
+}
+{ // osa: odbaci skakavca, uništi kombo, pa kratko ne može ponovno ubosti
+  const g = SK.newGame(1234);
+  const p = findPlat(g, p => p.wasp && SK.plat(g, p.i + 1) && !SK.plat(g, p.i).gone);
+  const w = SK.waspPos(g, p);
+  g.combo.jumps = 2; g.combo.floors = 5; g.combo.timer = 100;
+  g.x = w.x; g.y = w.y + 10; g.ground = false; g.vy = -1; g.floor = p.i;
+  SK.step(g, {});
+  assert.strictEqual(g.hits, 1); assert.strictEqual(g.combo.jumps, 0, 'kombo propao'); assert(g.inv > 0);
+  assert.strictEqual(g.bonus, 0, 'izgubljeni kombo ne donosi bodove');
+  SK.step(g, {}); assert.strictEqual(g.hits, 1, 'kratko nedodirljiv');
+}
+{ // upravljanje prstom: ax je jačina (pola = sporije ubrzanje)
+  const a = SK.newGame(3), b = SK.newGame(3);
+  run(a, { ax: 1 }, 5); run(b, { ax: 0.5 }, 5);
+  assert(a.vx > 0 && Math.abs(a.vx - 2 * b.vx) < 1e-9 && a.face === 1);
+  run(a, { ax: -1 }, 30); assert(a.vx < 0 && a.face === -1);
+}
 { // jednostavan bot koji trči i skače stigne visoko i složi kombo
   const g = SK.newGame(42, 760); let d = 1;
   run(g, g => { if (g.x > SK.W - 60) d = -1; if (g.x < 60) d = 1; return { l: d < 0, r: d > 0, j: Math.abs(g.vx) > 8 }; }, 60 * 300);
   assert(g.maxFloor >= 30, 'bot stigne barem do 30. kata: ' + g.maxFloor);
+  assert(g.stars > 0, 'pokupi koju zvjezdicu');
   assert(g.bestCombo >= 4 && g.bonus > 0, 'bot složi kombo');
   console.log('fizika i kombo ok (bot: kat', g.maxFloor, '· bodova', SK.score(g) + ')');
 }

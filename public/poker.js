@@ -40,8 +40,16 @@
   const strength = pv;
   const points = () => 0;
 
+  // kriptografski slučajni brojevi (preglednik i Node 18+); Math.random samo kao rezerva
+  const RNG = (function () {
+    const c = typeof globalThis !== 'undefined' && globalThis.crypto;
+    if (!c || typeof c.getRandomValues !== 'function') return Math.random;
+    const buf = new Uint32Array(2);
+    return function () { c.getRandomValues(buf); return (buf[0] * 2097152 + (buf[1] >>> 11)) / 9007199254740992; };
+  })();
+
   function shuffle(arr, rng) {
-    rng = rng || Math.random;
+    rng = rng || RNG;
     for (let i = arr.length - 1; i > 0; i--) {
       const j = Math.floor(rng() * (i + 1));
       const t = arr[i]; arr[i] = arr[j]; arr[j] = t;
@@ -148,7 +156,7 @@
     const st = {
       kind: 'poker', mode, players, startChips: chips,
       blindEvery: +opts.blindEvery > 0 ? +opts.blindEvery : BLIND_EVERY,
-      dealer: opts.dealer != null ? ((opts.dealer % mode) + mode) % mode : Math.floor((opts.rng || Math.random)() * mode),
+      dealer: opts.dealer != null ? ((opts.dealer % mode) + mode) % mode : Math.floor((opts.rng || RNG)() * mode),
       handNo: 0, board: [], deck: [], street: 0, curBet: 0, minRaise: 0, turn: 0, leader: 0,
       trick: [], trickNo: 0, log: [], shown: {}, handResult: null, result: null, elim: [], hands: [],
       phase: 'play',
@@ -419,7 +427,7 @@
 
   return {
     SUITS, RANKS, CAT, PV_SHORT, BLINDS, START_CHIPS, BLIND_EVERY,
-    suitOf, rankOf, pv, strength, points, fullDeck, shuffle, evaluate, catOf, handName, bestFive,
+    suitOf, rankOf, pv, strength, points, fullDeck, shuffle, RNG, evaluate, catOf, handName, bestFive,
     teamOf, newGame, legal, canPlay, play, collect, nextHand, viewFor, playerPoints, pot,
   };
 });
